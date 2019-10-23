@@ -49,10 +49,19 @@ import java.util.concurrent.ConcurrentMap;
 @Component
 public class RaftStore {
 
+    /**
+     *  保存磁盘上 meta.properties 中的内容
+     */
     private Properties meta = new Properties();
 
+    /**
+     * 保存 nacos term 的元数据文件
+     */
     private String metaFileName = UtilsAndCommons.DATA_BASE_DIR + File.separator + "meta.properties";
 
+    /**
+     * nacos 保存的数据所在目录
+     */
     private String cacheDir = UtilsAndCommons.DATA_BASE_DIR + File.separator + "data";
 
     /**
@@ -88,6 +97,12 @@ public class RaftStore {
         Loggers.RAFT.info("finish loading all datums, size: {} cost {} ms.", datums.size(), (System.currentTimeMillis() - start));
     }
 
+    /**
+     * 加载 meta.properties 文件到内存中，保存在 {@code meta} 成员内。
+     *
+     * @return
+     * @throws Exception
+     */
     public synchronized Properties loadMeta() throws Exception {
         File metaFile = new File(metaFileName);
         if (!metaFile.exists() && !metaFile.getParentFile().mkdirs() && !metaFile.createNewFile()) {
@@ -100,6 +115,13 @@ public class RaftStore {
         return meta;
     }
 
+    /**
+     * 加载指定文件内容并返回，nacos 中每个 datum 对应 data 目录下一个文件，每个文件的名称即 datum 的 key。
+     *
+     * @param key 文件名
+     * @return
+     * @throws Exception
+     */
     public synchronized Datum load(String key) throws Exception {
         long start = System.currentTimeMillis();
         // load data
@@ -120,6 +142,14 @@ public class RaftStore {
         return null;
     }
 
+    /**
+     * 从指定文件读取 datum 并返回。
+     *
+     * @param file 指定文件对象
+     * @param namespaceId 未用
+     * @return
+     * @throws IOException
+     */
     public synchronized Datum readDatum(File file, String namespaceId) throws IOException {
 
         ByteBuffer buffer;
@@ -134,11 +164,13 @@ public class RaftStore {
                 return null;
             }
 
+            // 反序列化 SwitchDomain 类的 datum
             if (KeyBuilder.matchSwitchKey(file.getName())) {
                 return JSON.parseObject(json, new TypeReference<Datum<SwitchDomain>>() {
                 });
             }
 
+            // 反序列化 Service 类的 datum
             if (KeyBuilder.matchServiceMetaKey(file.getName())) {
 
                 Datum<Service> serviceDatum;
@@ -166,6 +198,7 @@ public class RaftStore {
                 return serviceDatum;
             }
 
+            // 反序列化 Instances 类的 datum
             if (KeyBuilder.matchInstanceListKey(file.getName())) {
 
                 Datum<Instances> instancesDatum;
@@ -198,6 +231,7 @@ public class RaftStore {
                 return instancesDatum;
             }
 
+            // 反序列化兜底
             return JSON.parseObject(json, Datum.class);
 
         } catch (Exception e) {
@@ -210,6 +244,12 @@ public class RaftStore {
         }
     }
 
+    /**
+     * 将 datum 持久化到磁盘中，每个 datum 对应一个文件，文件名即为 datum key
+     *
+     * @param datum
+     * @throws Exception
+     */
     public synchronized void write(final Datum datum) throws Exception {
 
         String namespaceId = KeyBuilder.getNamespace(datum.key);
@@ -264,6 +304,7 @@ public class RaftStore {
 
     /**
      * 加载 data 目录下文件列表
+     *
      * @return
      * @throws Exception
      */
@@ -276,6 +317,11 @@ public class RaftStore {
         return cacheDir.listFiles();
     }
 
+    /**
+     * 从磁盘删除 datum 对应的文件
+     *
+     * @param datum
+     */
     public void delete(Datum datum) {
 
         // datum key contains namespace info:
@@ -283,6 +329,7 @@ public class RaftStore {
 
         if (StringUtils.isNotBlank(namespaceId)) {
 
+            // 定位到该 datum 对应的文件路径
             File cacheFile = new File(cacheDir + File.separator + namespaceId + File.separator + encodeFileName(datum.key));
             if (cacheFile.exists() && !cacheFile.delete()) {
                 Loggers.RAFT.error("[RAFT-DELETE] failed to delete datum: {}, value: {}", datum.key, datum.value);
@@ -291,6 +338,12 @@ public class RaftStore {
         }
     }
 
+    /**
+     * 更新内存 meta 对象中以及对应的磁盘中 meta.properties 的 term 值
+     *
+     * @param term
+     * @throws Exception
+     */
     public void updateTerm(long term) throws Exception {
         File file = new File(metaFileName);
         if (!file.exists() && !file.getParentFile().mkdirs() && !file.createNewFile()) {

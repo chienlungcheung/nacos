@@ -30,6 +30,8 @@ import org.springframework.stereotype.Service;
 /**
  * Use simplified Raft protocol to maintain the consistency status of Nacos cluster.
  *
+ * 使用简化的 raft 算法来维护 nacos 集群状态的一致性。
+ *
  * @author nkorange
  * @since 1.0.0
  */
@@ -58,14 +60,19 @@ public class RaftConsistencyServiceImpl implements PersistentConsistencyService 
     @Override
     public void remove(String key) throws NacosException {
         try {
+            // 如果接收到 remove 请求的节点非 leader，则将相关数据从本地节点删除然后立即返回
             if (KeyBuilder.matchInstanceListKey(key) && !raftCore.isLeader()) {
                 Datum datum = new Datum();
                 datum.key = key;
+                // 将数据从本地节点删除
                 raftCore.onDelete(datum.key, peers.getLeader());
+                // 将该数据对应的集群监听器列表也删除
                 raftCore.unlistenAll(key);
                 return;
             }
+            // 如果接收到 remove 请求的是 leader，则需要将该删除操作广播到集群
             raftCore.signalDelete(key);
+            // 将该数据对应的集群监听器列表也删除
             raftCore.unlistenAll(key);
         } catch (Exception e) {
             Loggers.RAFT.error("Raft remove failed.", e);

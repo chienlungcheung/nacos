@@ -27,6 +27,8 @@ import java.util.Map;
 /**
  * Report local server status to other server
  *
+ * 把本地服务器的状态信息报告给其它服务器。
+ *
  * @author nacos
  */
 public class ServerStatusSynchronizer implements Synchronizer {

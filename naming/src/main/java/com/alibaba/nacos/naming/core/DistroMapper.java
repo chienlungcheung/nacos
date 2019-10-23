@@ -109,6 +109,7 @@ public class DistroMapper implements ServerChangeListener {
     @Override
     public void onChangeHealthyServerList(List<Server> latestReachableMembers) {
 
+        // 用新的集群可达成员列表替换本地可达列表
         List<String> newHealthyList = new ArrayList<>();
         for (Server server : latestReachableMembers) {
             newHealthyList.add(server.getKey());

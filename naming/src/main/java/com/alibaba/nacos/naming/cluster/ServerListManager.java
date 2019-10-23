@@ -35,6 +35,8 @@ import static com.alibaba.nacos.core.utils.SystemUtils.*;
 /**
  * The manager to globally refresh and operate server list.
  *
+ * 负责全局刷新和操作服务器列表的管理者
+ *
  * @author nkorange
  * @since 1.0.0
  */
@@ -52,8 +54,14 @@ public class ServerListManager {
 
     private List<Server> healthyServers = new ArrayList<>();
 
+    /**
+     * 保存每个服务器发送给本机的状态报告（包含了时间戳、可用处理器等，类似于心跳，会周期性发送）
+     */
     private Map<String, List<Server>> distroConfig = new ConcurrentHashMap<>();
 
+    /**
+     * 保存接收到每个服务器状态报告时刻的时间戳
+     */
     private Map<String, Long> distroBeats = new ConcurrentHashMap<>(16);
 
     private Set<String> liveSites = new HashSet<>();
@@ -66,16 +74,27 @@ public class ServerListManager {
 
     private Synchronizer synchronizer = new ServerStatusSynchronizer();
 
+    /**
+     * 将监听器添加到列表中，有消息发生的时候会调用之。
+     *
+     * @param listener
+     */
     public void listen(ServerChangeListener listener) {
         listeners.add(listener);
     }
 
     @PostConstruct
     public void init() {
+        // 将服务器列表刷新任务和服务器状态报告任务加入到全局定时调度器中
         GlobalExecutor.registerServerListUpdater(new ServerListUpdater());
         GlobalExecutor.registerServerStatusReporter(new ServerStatusReporter(), 5000);
     }
 
+    /**
+     * 从集群配置文件或者环境变量中读取集群的当前服务器列表
+     *
+     * @return
+     */
     private List<Server> refreshServerList() {
 
         List<Server> result = new ArrayList<>();
@@ -90,6 +109,7 @@ public class ServerListManager {
 
         List<String> serverList = new ArrayList<>();
         try {
+            // 读取集群服务器 ip[:port] 列表
             serverList = readClusterConf();
         } catch (Exception e) {
             Loggers.SRV_LOG.warn("failed to get config: " + CLUSTER_CONF_FILE_PATH, e);
@@ -99,6 +119,7 @@ public class ServerListManager {
             Loggers.SRV_LOG.debug("SERVER-LIST from cluster.conf: {}", result);
         }
 
+        // 如果集群配置文件为空，则取环境变量 naming_self_service_cluster_ips 的值
         //use system env
         if (CollectionUtils.isEmpty(serverList)) {
             serverList = SystemUtils.getIPsBySystemEnv(UtilsAndCommons.SELF_SERVICE_CLUSTER_ENV);
@@ -114,10 +135,12 @@ public class ServerListManager {
                 String ip;
                 int port;
                 String server = serverList.get(i);
+                // 解析 ip:port
                 if (server.contains(UtilsAndCommons.IP_PORT_SPLITER)) {
                     ip = server.split(UtilsAndCommons.IP_PORT_SPLITER)[0];
                     port = Integer.parseInt(server.split(UtilsAndCommons.IP_PORT_SPLITER)[1]);
                 } else {
+                    // 如果只有 ip，则用运行时配置的端口号
                     ip = server;
                     port = RunningConfig.getServerPort();
                 }
@@ -149,11 +172,15 @@ public class ServerListManager {
         return healthyServers;
     }
 
+    /**
+     * 调用监听器列表每个监听器对应方法，更新其服务器列表和服务器健康状态
+     */
     private void notifyListeners() {
 
         GlobalExecutor.notifyServerListChange(new Runnable() {
             @Override
             public void run() {
+                // 遍历监听器列表，分别调用每个监听器的相关方法
                 for (ServerChangeListener listener : listeners) {
                     listener.onChangeServerList(servers);
                     listener.onChangeHealthyServerList(healthyServers);
@@ -166,6 +193,12 @@ public class ServerListManager {
         return distroConfig;
     }
 
+    /**
+     * 每个服务器会周期性的将自己的状态报告（类似于心跳）发送给集群全部服务器。
+     * 该方法负责解析并更新本地维护的心跳信息。
+     *
+     * @param configInfo
+     */
     public synchronized void onReceiveServerStatus(String configInfo) {
 
         Loggers.SRV_LOG.info("receive config info: {}", configInfo);
@@ -187,6 +220,7 @@ public class ServerListManager {
                 continue;
             }
 
+            // 基于参数中传过来的信息构造 server
             Server server = new Server();
 
             server.setSite(params[0]);
@@ -194,10 +228,14 @@ public class ServerListManager {
             server.setServePort(Integer.parseInt(params[1].split(UtilsAndCommons.IP_PORT_SPLITER)[1]));
             server.setLastRefTime(Long.parseLong(params[2]));
 
+            // 如果状态所属的 server 不在当前服务器列表中，则报错（集群服务器列表发生了变更，但是这个接收报告的机器还不知道）
             if (!contains(server.getKey())) {
                 throw new IllegalArgumentException("server: " + server.getKey() + " is not in serverlist");
             }
 
+            // 检查 server 是否还活着，并更新其最后一次心跳发生时间；
+            // 注意，状态报告就是上面提到的心跳。
+            // 每个服务器会周期性的将自己的状态报告发送给集群全部服务器。
             Long lastBeat = distroBeats.get(server.getKey());
             long now = System.currentTimeMillis();
             if (null != lastBeat) {
@@ -205,11 +243,14 @@ public class ServerListManager {
             }
             distroBeats.put(server.getKey(), now);
 
+            // 取出状态报告中携带的时间戳进行格式化
             Date date = new Date(Long.parseLong(params[2]));
             server.setLastRefTimeStr(new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(date));
 
+            // 如果参数中包含 weight 则解析并设置，否则设置为 1
             server.setWeight(params.length == 4 ? Integer.parseInt(params[3]) : 1);
             List<Server> list = distroConfig.get(server.getSite());
+            // 如果 list 不为空则 server 不会提前加入到 list 中
             if (list == null || list.size() <= 0) {
                 list = new ArrayList<>();
                 list.add(server);
@@ -220,6 +261,7 @@ public class ServerListManager {
                 String serverId = s.getKey() + "_" + s.getSite();
                 String newServerId = server.getKey() + "_" + server.getSite();
 
+                // 如果 server 出现在过 list 中，则将其加入到 tmpServerList 中
                 if (serverId.equals(newServerId)) {
                     if (s.isAlive() != server.isAlive() || s.getWeight() != server.getWeight()) {
                         Loggers.SRV_LOG.warn("server beat out of date, current: {}, last: {}",
@@ -228,9 +270,11 @@ public class ServerListManager {
                     tmpServerList.add(server);
                     continue;
                 }
+                // 将非本次状态报告发送机器节点直接加入到 tmpServerList 中
                 tmpServerList.add(s);
             }
 
+            // 如果上面 server 没有机会（如 list 初始不为空，且没有与 server 同 key 的 s）加入到 tmpServerList 则加入
             if (!tmpServerList.contains(server)) {
                 tmpServerList.add(server);
             }
@@ -281,6 +325,10 @@ public class ServerListManager {
         }
     }
 
+    /**
+     * 通过读取配置文件或则环境变量获取集群的当前最新服务器列表；如果有变化则通知各个监听器。
+     * 该任务会被加入到全局定时调度器中周期性执行。
+     */
     public class ServerListUpdater implements Runnable {
 
         @Override
@@ -296,20 +344,25 @@ public class ServerListManager {
 
                 boolean changed = false;
 
+                // refreshed - old 的差集即为刷新后服务器的增量
                 List<Server> newServers = (List<Server>) CollectionUtils.subtract(refreshedServers, oldServers);
                 if (CollectionUtils.isNotEmpty(newServers)) {
+                    // 将新增服务器加入到当前服务器列表中
                     servers.addAll(newServers);
                     changed = true;
                     Loggers.RAFT.info("server list is updated, new: {} servers: {}", newServers.size(), newServers);
                 }
 
+                // old - refreshed 的差集即为原服务器列表中挂掉的机器
                 List<Server> deadServers = (List<Server>) CollectionUtils.subtract(oldServers, refreshedServers);
                 if (CollectionUtils.isNotEmpty(deadServers)) {
+                    // 从当前服务器列表中移除挂掉的机器
                     servers.removeAll(deadServers);
                     changed = true;
                     Loggers.RAFT.info("server list is updated, dead: {}, servers: {}", deadServers.size(), deadServers);
                 }
 
+                // 如果当前服务器列表有更新，则通知各个监听器
                 if (changed) {
                     notifyListeners();
                 }
@@ -333,14 +386,18 @@ public class ServerListManager {
 
                 checkDistroHeartbeat();
 
+                // 服务器可用的处理器数目的一半作为服务器的 weight（服务器处理器数也算服务器状态）
                 int weight = Runtime.getRuntime().availableProcessors() / 2;
                 if (weight <= 0) {
                     weight = 1;
                 }
 
+                // 当前时间戳
                 long curTime = System.currentTimeMillis();
+                // site:ip:lastReportTime:weight
                 String status = LOCALHOST_SITE + "#" + NetUtils.localServer() + "#" + curTime + "#" + weight + "\r\n";
 
+                // 服务器的状态信息发送给全部 server，当然包括自己
                 //send status to itself
                 onReceiveServerStatus(status);
 
@@ -353,6 +410,7 @@ public class ServerListManager {
 
                 if (allServers.size() > 0 && !NetUtils.localServer().contains(UtilsAndCommons.LOCAL_HOST_IP)) {
                     for (com.alibaba.nacos.naming.cluster.servers.Server server : allServers) {
+                        // 上面给自己发过一遍了，这里不用再重复了，而且还走网络。
                         if (server.getKey().equals(NetUtils.localServer())) {
                             continue;
                         }
@@ -360,6 +418,8 @@ public class ServerListManager {
                         Message msg = new Message();
                         msg.setData(status);
 
+                        // 通过 get 请求将本地服务器的状态信息，即上面组装的 status，发送给目标 server；
+                        // 与该方法对应的是 ServerListManager.onReceiveServerStatus()
                         synchronizer.send(server.getKey(), msg);
 
                     }
@@ -367,6 +427,7 @@ public class ServerListManager {
             } catch (Exception e) {
                 Loggers.SRV_LOG.error("[SERVER-STATUS] Exception while sending server status", e);
             } finally {
+                // 本来是 one-shot 的，但是每次执行完都重新注册变相实现了周期性调用
                 GlobalExecutor.registerServerStatusReporter(this, switchDomain.getServerStatusSynchronizationPeriodMillis());
             }
 
@@ -385,10 +446,12 @@ public class ServerListManager {
         List<Server> newHealthyList = new ArrayList<>(servers.size());
         long now = System.currentTimeMillis();
         for (Server s: servers) {
+            // 读取当前服务器的上个心跳时间戳
             Long lastBeat = distroBeats.get(s.getKey());
             if (null == lastBeat) {
                 continue;
             }
+            // 如果未超时，则认为服务器还活着，否则就认为挂了
             s.setAlive(now - lastBeat < switchDomain.getDistroServerExpiredMillis());
         }
 
@@ -396,12 +459,14 @@ public class ServerListManager {
         List<String> allLocalSiteSrvs = new ArrayList<>();
         for (Server server : servers) {
 
+            // todo 这个端口号是个什么鬼？
             if (server.getKey().endsWith(":0")) {
                 continue;
             }
 
             server.setAdWeight(switchDomain.getAdWeight(server.getKey()) == null ? 0 : switchDomain.getAdWeight(server.getKey()));
 
+            // todo 这个循环条件是啥意思？
             for (int i = 0; i < server.getWeight() + server.getAdWeight(); i++) {
 
                 if (!allLocalSiteSrvs.contains(server.getKey())) {
@@ -415,21 +480,26 @@ public class ServerListManager {
         }
 
         Collections.sort(newHealthyList);
+        // 计算集群当前健康节点数相对于全部节点数的比例
         float curRatio = (float) newHealthyList.size() / allLocalSiteSrvs.size();
 
+        // 如果健康检查关闭了 && 当前存活率超过阈值 && 又该进行健康检查了
         if (autoDisabledHealthCheck
             && curRatio > switchDomain.getDistroThreshold()
             && System.currentTimeMillis() - lastHealthServerMillis > STABLE_PERIOD) {
             Loggers.SRV_LOG.info("[NACOS-DISTRO] distro threshold restored and " +
                 "stable now, enable health check. current ratio: {}", curRatio);
 
+            // 开启健康检查
             switchDomain.setHealthCheckEnabled(true);
 
             // we must set this variable, otherwise it will conflict with user's action
             autoDisabledHealthCheck = false;
         }
 
+        // 如果新的存活列表与老的不一致
         if (!CollectionUtils.isEqualCollection(healthyServers, newHealthyList)) {
+            // todo 每次存活列表有变更时，关闭一会健康检查，为啥？
             // for every change disable healthy check for some while
             if (switchDomain.isHealthCheckEnabled()) {
                 Loggers.SRV_LOG.info("[NACOS-DISTRO] healthy server list changed, " +

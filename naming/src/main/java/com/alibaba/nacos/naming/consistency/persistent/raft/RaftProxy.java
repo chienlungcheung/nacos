@@ -30,6 +30,14 @@ import java.util.Map;
 @Component
 public class RaftProxy {
 
+    /**
+     * 转发 GET 请求给拼装好的 URL
+     *
+     * @param server
+     * @param api
+     * @param params
+     * @throws Exception
+     */
     public void proxyGET(String server, String api, Map<String, String> params) throws Exception {
         // do proxy
         if (!server.contains(UtilsAndCommons.IP_PORT_SPLITER)) {
@@ -43,6 +51,15 @@ public class RaftProxy {
         }
     }
 
+    /**
+     * 比较通用的方法，用户可以指定 HTTP METHOD
+     *
+     * @param server
+     * @param api
+     * @param params
+     * @param method
+     * @throws Exception
+     */
     public void proxy(String server, String api, Map<String, String> params, HttpMethod method) throws Exception {
         // do proxy
         if (!server.contains(UtilsAndCommons.IP_PORT_SPLITER)) {
@@ -70,7 +87,8 @@ public class RaftProxy {
     }
 
     /**
-     * 转发 POST 请求
+     * 转发大数据量的 POST 请求到拼装好的 URL
+     *
      * @param server 目标机器的 IP[:port]
      * @param api restful api，URL path 的一部分，与 server 一起组装成目标 URL
      * @param content POST body

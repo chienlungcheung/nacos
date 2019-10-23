@@ -134,12 +134,20 @@ public class KeyBuilder {
             + key;
     }
 
+    /**
+     * 从 datum key 中提取 namespace id
+     *
+     * @param key
+     * @return
+     */
     public static String getNamespace(String key) {
 
         if (matchSwitchKey(key)) {
             return StringUtils.EMPTY;
         }
 
+        // 举例：com.alibaba.nacos.naming.domains.meta.a621cf49-c80d-4865-82b5-27586a3bb604##test@@test-grpc
+        // 返回的就是 a621cf49-c80d-4865-82b5-27586a3bb604
         if (matchServiceMetaKey(key)) {
             return key.split(NAMESPACE_KEY_CONNECTOR)[0].substring(SERVICE_META_KEY_PREFIX.length());
         }

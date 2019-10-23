@@ -200,6 +200,7 @@ public class RaftPeerSet implements ServerChangeListener, ApplicationContextAwar
 
             if (!Objects.equals(leader, peer)) {
                 leader = peer;
+                // leader 选出来以后，发布一个 LeaderElectFinishedEvent 给订阅者
                 applicationContext.publishEvent(new LeaderElectFinishedEvent(this, leader));
                 Loggers.RAFT.info("{} has become the LEADER", leader.ip);
             }
@@ -217,6 +218,7 @@ public class RaftPeerSet implements ServerChangeListener, ApplicationContextAwar
     public RaftPeer makeLeader(RaftPeer candidate) {
         if (!Objects.equals(leader, candidate)) {
             leader = candidate;
+            // 指定 leader 以后，发布一个 MakeLeaderEvent 给订阅者
             applicationContext.publishEvent(new MakeLeaderEvent(this, leader));
             Loggers.RAFT.info("{} has become the LEADER, local: {}, leader: {}",
                 leader.ip, JSON.toJSONString(local()), JSON.toJSONString(leader));
@@ -342,6 +344,7 @@ public class RaftPeerSet implements ServerChangeListener, ApplicationContextAwar
             RaftPeer raftPeer = new RaftPeer();
             raftPeer.ip = member.getKey();
 
+            // 新节点里面有本地节点，设置其 term 值
             // first time meet the local server:
             if (NetUtils.localServer().equals(member.getKey())) {
                 raftPeer.term.set(localTerm.get());
@@ -354,7 +357,7 @@ public class RaftPeerSet implements ServerChangeListener, ApplicationContextAwar
         // replace raft peer set:
         peers = tmpPeers;
 
-        // todo节点的端口号大于 0 就行了（？）
+        // todo 节点的端口号大于 0 就行了（？）
         if (RunningConfig.getServerPort() > 0) {
             ready = true;
         }

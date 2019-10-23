@@ -119,6 +119,12 @@ public class SystemUtils {
         return NACOS_HOME + File.separator + "conf" + File.separator + "cluster.conf";
     }
 
+    /**
+     * 读取 nacos conf/cluster.conf 文件并解析，返回集群服务器 ip[:port] 列表。
+     *
+     * @return
+     * @throws IOException
+     */
     public static List<String> readClusterConf() throws IOException {
         List<String> instanceList = new ArrayList<String>();
         Reader reader = null;
@@ -130,10 +136,12 @@ public class SystemUtils {
             String comment = "#";
             for (String line : lines) {
                 String instance = line.trim();
+                // 忽略 '#' 开头的注释行
                 if (instance.startsWith(comment)) {
                     // # it is ip
                     continue;
                 }
+                // 处理包含注释的有效行
                 if (instance.contains(comment)) {
                     // 192.168.71.52:8848 # Instance A
                     instance = instance.substring(0, instance.indexOf(comment));

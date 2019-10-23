@@ -261,15 +261,24 @@ public class RaftCore {
             long end = System.currentTimeMillis();
             Loggers.RAFT.info("signalPublish cost {} ms, key: {}", (end - start), key);
         } finally {
+            // 发布完毕，释放锁
             OPERATE_LOCK.unlock();
         }
     }
 
+    /**
+     * 从集群删除 {@code key} 对应的数据。
+     *
+     * @param key
+     * @throws Exception
+     */
     public void signalDelete(final String key) throws Exception {
 
+        // 更改之前先获取锁
         OPERATE_LOCK.lock();
         try {
 
+            // 如果接收到删除操作的本地节点非 leader，则将删除操作借助 raftProxy 路由给 leader
             if (!isLeader()) {
                 Map<String, String> params = new HashMap<>(1);
                 params.put("key", URLEncoder.encode(key, "UTF-8"));
@@ -284,8 +293,10 @@ public class RaftCore {
             json.put("datum", datum);
             json.put("source", peers.local());
 
+            // 从本地节点删除该数据
             onDelete(datum.key, peers.local());
 
+            // 从其它 follower 节点删除该数据。todo 删除与发布不同，不需要检查大多数节点成功？
             for (final String server : peers.allServersWithoutMySelf()) {
                 String url = buildURL(server, API_ON_DEL);
                 HttpClient.asyncHttpDeleteLarge(url, null, JSON.toJSONString(json)
@@ -297,6 +308,8 @@ public class RaftCore {
                                 return 1;
                             }
 
+                            // 如果某个 follower 节点删除成功，则重置本地节点（即 leader）的选举超时；
+                            // 否则说明有情况，可能网络或者 follower 出问题了，可能要重新进行选举。
                             RaftPeer local = peers.local();
 
                             local.resetLeaderDue();
@@ -306,12 +319,13 @@ public class RaftCore {
                     });
             }
         } finally {
+            // 删除完毕，释放锁
             OPERATE_LOCK.unlock();
         }
     }
 
     /**
-     * 用 source （必须是当前 leader）将 datum 发布到集群中
+     * 将 datum 更新到本地节点，更新完毕后会调用 Notifier 发变更通知。
      *
      * @param datum 待发布数据
      * @param source 集群当前 leader
@@ -376,16 +390,25 @@ public class RaftCore {
         Loggers.RAFT.info("data added/updated, key={}, term={}", datum.key, local.term);
     }
 
+    /**
+     * 将 {@code datumKey} 从本地节点删除，更新完毕后会通过 {@code deleteDatum()} 调用 Notifier 发删除通知。
+     *
+     * @param datumKey
+     * @param source
+     * @throws Exception
+     */
     public void onDelete(String datumKey, RaftPeer source) throws Exception {
 
         RaftPeer local = peers.local();
 
+        // 发起删除操作的 source 必须是 leaer
         if (!peers.isLeader(source.ip)) {
             Loggers.RAFT.warn("peer {} tried to publish data but wasn't leader, leader: {}",
                 JSON.toJSONString(source), JSON.toJSONString(getLeader()));
             throw new IllegalStateException("peer(" + source.ip + ") tried to publish data but wasn't leader");
         }
 
+        // source 作为 leader，term 不能小于本地节点
         if (source.term.get() < local.term.get()) {
             Loggers.RAFT.warn("out of date publish, pub-term: {}, cur-term: {}",
                 JSON.toJSONString(source), JSON.toJSONString(local));
@@ -393,12 +416,15 @@ public class RaftCore {
                 + source.term + ", cur-term: " + local.term);
         }
 
+        // 本地节点重置本地选举超时，避免删除期间发起选举
         local.resetLeaderDue();
 
+        // 从本地节点删除 key
         // do apply
         String key = datumKey;
         deleteDatum(key);
 
+        // 如果是 com.alibaba.nacos.naming.domains.meta. 类的 key，则删除完毕要更新本地 term，更新后的 term 不许超过 leader
         if (KeyBuilder.matchServiceMetaKey(key)) {
 
             if (local.term.get() + PUBLISH_TERM_INCREASE_COUNT > source.term.get()) {
@@ -607,7 +633,8 @@ public class RaftCore {
 
                     JSONObject element = new JSONObject();
 
-                    // 只在心跳中携带两种类型的集群数据
+                    // 只在心跳中携带两种键类型的集群数据，注意这里只携带键，对应的实际数据不在心跳中携带，否则太重了；
+                    // 实际数据由心跳接收者根据这里的键自己拉取。
                     if (KeyBuilder.matchServiceMetaKey(datum.key)) {
                         element.put("key", KeyBuilder.briefServiceMetaKey(datum.key));
                     } else if (KeyBuilder.matchInstanceListKey(datum.key)) {
@@ -727,6 +754,8 @@ public class RaftCore {
 
         Map<String, Integer> receivedKeysMap = new HashMap<>(datums.size());
 
+        // 将本地存储的数据键放入 map，value 为计数值，后面如果从心跳中发现了对应的数据键则会将计数值改为 1；
+        // 方法结束时会查看每个数据键的计数值，如果为 0 则说明 leader 侧已经删除了相关数据，即为 deadKey，本地节点也应将其删除。
         for (Map.Entry<String, Datum> entry : datums.entrySet()) {
             receivedKeysMap.put(entry.getKey(), 0);
         }
@@ -742,6 +771,7 @@ public class RaftCore {
             for (Object object : beatDatums) {
                 processedCount = processedCount + 1;
 
+                // 每个 entry 包含一个 datum 相关 key 和 timestamp 信息
                 JSONObject entry = (JSONObject) object;
                 String key = entry.getString("key");
                 final String datumKey;
@@ -775,9 +805,10 @@ public class RaftCore {
                         continue;
                     }
 
-                    // 用逗号将 50 个数据键级联起来
+                    // 用逗号将 50 个数据键级联起来，如果太多下面拉取数据时数据量将会非常大
                     String keys = StringUtils.join(batch, ",");
 
+                    // todo 这个判断有点莫名，上面不是用  < 50 拦截过了吗
                     if (batch.size() <= 0) {
                         continue;
                     }
@@ -785,6 +816,8 @@ public class RaftCore {
                     Loggers.RAFT.info("get datums from leader: {}, batch size is {}, processedCount is {}, datums' size is {}, RaftCore.datums' size is {}"
                         , getLeader().ip, batch.size(), processedCount, beatDatums.size(), datums.size());
 
+                    // 携带着上述 50 个数据键去请求 leader，leader 会返回这些数据键对应的数据，
+                    // 然后本地节点用这些数据更新本地的数据。
                     // update datum entry
                     String url = buildURL(remote.ip, API_GET) + "?keys=" + URLEncoder.encode(keys, "UTF-8");
                     HttpClient.asyncHttpGet(url, null, null, new AsyncCompletionHandler<Integer>() {
@@ -798,12 +831,14 @@ public class RaftCore {
                             });
 
                             for (JSONObject datumJson : datumList) {
+                                // 更新本地数据时获取锁
                                 OPERATE_LOCK.lock();
                                 Datum newDatum = null;
                                 try {
 
                                     Datum oldDatum = getDatum(datumJson.getString("key"));
 
+                                    // 只有 leader 返回的数据比本地的数据更新时才进行更新
                                     if (oldDatum != null && datumJson.getLongValue("timestamp") <= oldDatum.timestamp.get()) {
                                         Loggers.RAFT.info("[NACOS-RAFT] timestamp is smaller than that of mine, key: {}, remote: {}, local: {}",
                                             datumJson.getString("key"), datumJson.getLongValue("timestamp"), oldDatum.timestamp);
@@ -833,20 +868,27 @@ public class RaftCore {
                                         continue;
                                     }
 
+                                    // 将新数据持久化
                                     raftStore.write(newDatum);
 
+                                    // 用新数据替换本地节点内存中的旧数据
                                     datums.put(newDatum.key, newDatum);
+                                    // 数据有变更，触发通知
                                     notifier.addTask(newDatum.key, ApplyAction.CHANGE);
 
+                                    // 重置本地节点选举超时 todo 上面不是已经重置过来吗？怕上面拉取数据的 http 请求耗时太多？
                                     local.resetLeaderDue();
 
+                                    // 更新本地节点的 term 但是不能超过 leader 的 term
                                     if (local.term.get() + 100 > remote.term.get()) {
                                         getLeader().term.set(remote.term.get());
                                         local.term.set(getLeader().term.get());
                                     } else {
+                                        // todo 加 100 意义何在呢？仅仅是为了表示本地有更新吗？那直接用 leader 的不是更好吗？
                                         local.term.addAndGet(100);
                                     }
 
+                                    // 将本地节点 term 持久化
                                     raftStore.updateTerm(local.term.get());
 
                                     Loggers.RAFT.info("data updated, key: {}, timestamp: {}, from {}, local term: {}",
@@ -855,14 +897,17 @@ public class RaftCore {
                                 } catch (Throwable e) {
                                     Loggers.RAFT.error("[RAFT-BEAT] failed to sync datum from leader, datum: {}", newDatum, e);
                                 } finally {
+                                    // 更新完毕，释放锁
                                     OPERATE_LOCK.unlock();
                                 }
                             }
+                            // todo 这个等待意义何在？
                             TimeUnit.MILLISECONDS.sleep(200);
                             return 0;
                         }
                     });
 
+                    // 清空，处理下一批
                     batch.clear();
 
                 } catch (Exception e) {
@@ -871,6 +916,7 @@ public class RaftCore {
 
             }
 
+            // 如果随心跳到达的数据中，有数据失效了，则从本地节点删除之
             List<String> deadKeys = new ArrayList<>();
             for (Map.Entry<String, Integer> entry : receivedKeysMap.entrySet()) {
                 if (entry.getValue() == 0) {
@@ -891,8 +937,15 @@ public class RaftCore {
         return local;
     }
 
+    /**
+     * 将监听器 {@code listener} 添加到 {@code key} 监听列表中，添加完毕针对该监听器感兴趣的数据要触发该监听器的相关方法。
+     *
+     * @param key
+     * @param listener
+     */
     public void listen(String key, RecordListener listener) {
 
+        // 如果监听器已存在则什么也不做
         List<RecordListener> listenerList = listeners.get(key);
         if (listenerList != null && listenerList.contains(listener)) {
             return;
@@ -905,8 +958,10 @@ public class RaftCore {
 
         Loggers.RAFT.info("add listener: {}", key);
 
+        // 将新的监听器加入到数据对应的监听器列表中
         listenerList.add(listener);
 
+        // 遍历全部数据，遇到该监听器感兴趣的数据就触发该监听器相关方法
         // if data present, notify immediately
         for (Datum datum : datums.values()) {
             if (!listener.interests(datum.key)) {
@@ -921,6 +976,12 @@ public class RaftCore {
         }
     }
 
+    /**
+     * 将监听器 {@code listener} 从 {@code key} 对应的监听列表中移除
+     *
+     * @param key
+     * @param listener
+     */
     public void unlisten(String key, RecordListener listener) {
 
         if (!listeners.containsKey(key)) {
@@ -960,6 +1021,7 @@ public class RaftCore {
     }
 
     public Datum<?> getDatum(String key) {
+        // 集群全部数据都会在内存中保留一份
         return datums.get(key);
     }
 
@@ -1001,14 +1063,21 @@ public class RaftCore {
 
     }
 
+    /**
+     * {@code key} 已经失效，从本地节点中删除之。
+     *
+     * @param key
+     */
     private void deleteDatum(String key) {
         Datum deleted;
         try {
+            // 先从内存删除；如果存在则再从持久化存储删除之。
             deleted = datums.remove(URLDecoder.decode(key, "UTF-8"));
             if (deleted != null) {
                 raftStore.delete(deleted);
                 Loggers.RAFT.info("datum deleted, key: {}", key);
             }
+            // 将变更通知该数据的全部监听器
             notifier.addTask(URLDecoder.decode(key, "UTF-8"), ApplyAction.DELETE);
         } catch (UnsupportedEncodingException e) {
             Loggers.RAFT.warn("datum key decode failed: {}", key);

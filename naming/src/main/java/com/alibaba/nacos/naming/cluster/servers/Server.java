@@ -21,6 +21,8 @@ import com.alibaba.nacos.naming.misc.UtilsAndCommons;
 /**
  * Member node of Nacos cluster
  *
+ * nacos 集群的服务器对应的类型
+ *
  * @author nkorange
  * @since 1.0.0
  */
