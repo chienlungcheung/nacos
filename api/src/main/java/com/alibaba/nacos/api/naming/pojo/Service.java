@@ -25,7 +25,10 @@ import java.util.Map;
  * which contains a list of instances.
  * <p>
  * Typically we put some unique properties between instances to service level.
- *
+ * <p>
+ * 在 nacos 中，service 包含一系列 cluster，后者包含一系列 instance。
+ * <p>
+ * Service 各个属性可以在 Web-UI 的 ServiceManagement->ServiceList 中看到。
  * @author nkorange
  */
 public class Service {

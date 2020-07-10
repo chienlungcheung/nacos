@@ -68,6 +68,7 @@ public class FastJsonSerializer implements Serializer {
             for (Map.Entry<String, JSONObject> entry : dataMap.entrySet()) {
 
                 Datum<T> datum = new Datum<>();
+                // 每个数据项关键三元素：时间戳、key、value
                 datum.timestamp.set(entry.getValue().getLongValue("timestamp"));
                 datum.key = entry.getValue().getString("key");
                 datum.value = JSON.parseObject(entry.getValue().getJSONObject("value").toJSONString(), clazz);

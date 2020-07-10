@@ -34,8 +34,8 @@ import static com.alibaba.nacos.core.utils.SystemUtils.*;
 
 /**
  * The manager to globally refresh and operate server list.
- *
- * 负责全局刷新和操作服务器列表的管理者
+ * <p>
+ * ServerListManager 是 nacos 的一个全局管理器，负责周期性刷新和操作服务器列表。
  *
  * @author nkorange
  * @since 1.0.0
@@ -50,22 +50,34 @@ public class ServerListManager {
 
     private List<ServerChangeListener> listeners = new ArrayList<>();
 
+    /**
+     * servers 负责保存当前最新的 raft 集群节点集合
+     */
     private List<Server> servers = new ArrayList<>();
 
+    /**
+     * healthyServers 用于保存当前 raft 集群可达实例列表
+     */
     private List<Server> healthyServers = new ArrayList<>();
 
     /**
-     * 保存每个服务器发送给本机的状态报告（包含了时间戳、可用处理器等，类似于心跳，会周期性发送）
+     * 保存每个服务器实例发送给本机的状态报告（包含了时间戳、可用处理器等，类似于心跳，会周期性发送）
      */
     private Map<String, List<Server>> distroConfig = new ConcurrentHashMap<>();
 
     /**
-     * 保存接收到每个服务器状态报告时刻的时间戳
+     * 保存接收到每个服务器状态报告的时间戳
      */
     private Map<String, Long> distroBeats = new ConcurrentHashMap<>(16);
 
+    /**
+     * 存活的站点集合
+     */
     private Set<String> liveSites = new HashSet<>();
 
+    /**
+     * nacos 集群的站点名称
+     */
     private final static String LOCALHOST_SITE = UtilsAndCommons.UNKNOWN_SITE;
 
     private long lastHealthServerMillis = 0L;
@@ -91,7 +103,7 @@ public class ServerListManager {
     }
 
     /**
-     * 从集群配置文件或者环境变量中读取集群的当前服务器列表
+     * refreshServerList 从集群配置文件或者环境变量中读取集群的当前服务器列表，返回的最新节点列表会被
      *
      * @return
      */
@@ -109,7 +121,7 @@ public class ServerListManager {
 
         List<String> serverList = new ArrayList<>();
         try {
-            // 读取集群服务器 ip[:port] 列表
+            // 从 conf/cluster.conf 文件读取集群服务器 ip[:port] 列表
             serverList = readClusterConf();
         } catch (Exception e) {
             Loggers.SRV_LOG.warn("failed to get config: " + CLUSTER_CONF_FILE_PATH, e);
@@ -173,14 +185,14 @@ public class ServerListManager {
     }
 
     /**
-     * 调用监听器列表每个监听器对应方法，更新其服务器列表和服务器健康状态
+     * notifyListeners 向全局调度器提交一个 one-shot 类型任务，负责调用监听器列表中每个监听器对应方法，更新其服务器列表和服务器健康状态
      */
     private void notifyListeners() {
 
         GlobalExecutor.notifyServerListChange(new Runnable() {
             @Override
             public void run() {
-                // 遍历监听器列表，分别调用每个监听器的相关方法
+                // 遍历监听器列表，分别调用每个监听器的相关方法（监听器根据需要实现这两个方法）
                 for (ServerChangeListener listener : listeners) {
                     listener.onChangeServerList(servers);
                     listener.onChangeHealthyServerList(healthyServers);
@@ -326,7 +338,9 @@ public class ServerListManager {
     }
 
     /**
-     * 通过读取配置文件或则环境变量获取集群的当前最新服务器列表；如果有变化则通知各个监听器。
+     * ServerListUpdater 周期性被调用，负责通过读取配置文件或环境变量获取 raft 集群的当前最新节点列表（这也是新增或者下线节点的办法）；
+     * 如果有变化则通知 RaftPeerSet 注册的监听器。
+     * <p>
      * 该任务会被加入到全局定时调度器中周期性执行。
      */
     public class ServerListUpdater implements Runnable {
@@ -353,7 +367,7 @@ public class ServerListManager {
                     Loggers.RAFT.info("server list is updated, new: {} servers: {}", newServers.size(), newServers);
                 }
 
-                // old - refreshed 的差集即为原服务器列表中挂掉的机器
+                // old - refreshed 的差集即为原服务器列表中挂掉或下掉的机器
                 List<Server> deadServers = (List<Server>) CollectionUtils.subtract(oldServers, refreshedServers);
                 if (CollectionUtils.isNotEmpty(deadServers)) {
                     // 从当前服务器列表中移除挂掉的机器
@@ -512,7 +526,9 @@ public class ServerListManager {
                 lastHealthServerMillis = System.currentTimeMillis();
             }
 
+            // 用新的集群可达实例列表替换老的
             healthyServers = newHealthyList;
+            // 通知监听器，集群可达实例列表更新了
             notifyListeners();
         }
     }

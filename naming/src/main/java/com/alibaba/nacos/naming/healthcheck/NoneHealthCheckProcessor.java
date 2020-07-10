@@ -19,6 +19,8 @@ import org.springframework.stereotype.Component;
 
 /**
  * Health checker that does nothing
+ * <p>
+ * 啥也不干
  *
  * @author nkorange
  * @since 1.0.0

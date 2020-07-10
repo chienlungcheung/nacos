@@ -16,6 +16,8 @@
 package com.alibaba.nacos.naming.consistency;
 
 /**
+ * 当前 raft 集群存储的数据的变化方式
+ * 
  * @author nkorange
  */
 public enum ApplyAction {

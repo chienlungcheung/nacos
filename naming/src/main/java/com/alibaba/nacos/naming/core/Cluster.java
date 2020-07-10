@@ -35,376 +35,384 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class Cluster extends com.alibaba.nacos.api.naming.pojo.Cluster implements Cloneable {
 
-    private static final String CLUSTER_NAME_SYNTAX = "[0-9a-zA-Z-]+";
-    /**
-     * a addition for same site routing, can group multiple sites into a region, like Hangzhou, Shanghai, etc.
-     */
-    private String sitegroup = StringUtils.EMPTY;
+  private static final String CLUSTER_NAME_SYNTAX = "[0-9a-zA-Z-]+";
+  /**
+   * a addition for same site routing, can group multiple sites into a region,
+   * like Hangzhou, Shanghai, etc.
+   */
+  private String sitegroup = StringUtils.EMPTY;
 
-    private int defCkport = 80;
+  private int defCkport = 80;
 
-    private int defIPPort = -1;
+  private int defIPPort = -1;
 
-    @JSONField(serialize = false)
-    private HealthCheckTask checkTask;
+  @JSONField(serialize = false)
+  private HealthCheckTask checkTask;
 
-    @JSONField(serialize = false)
-    private Set<Instance> persistentInstances = new HashSet<>();
+  @JSONField(serialize = false)
+  private Set<Instance> persistentInstances = new HashSet<>();
 
-    @JSONField(serialize = false)
-    private Set<Instance> ephemeralInstances = new HashSet<>();
+  @JSONField(serialize = false)
+  private Set<Instance> ephemeralInstances = new HashSet<>();
 
-    @JSONField(serialize = false)
-    private Service service;
+  @JSONField(serialize = false)
+  private Service service;
 
-    @JSONField(serialize = false)
-    private volatile boolean inited = false;
+  @JSONField(serialize = false)
+  private volatile boolean inited = false;
 
-    private Map<String, String> metadata = new ConcurrentHashMap<>();
+  private Map<String, String> metadata = new ConcurrentHashMap<>();
 
-    public Cluster() {
+  public Cluster() {
+  }
+
+  /**
+   * Create a cluster.
+   * <p>
+   * the cluster name cannot be null, and only the arabic numerals, letters and
+   * endashes are allowed.
+   *
+   * @param clusterName the cluster name
+   * @param service     the service to which the current cluster belongs
+   * @throws IllegalArgumentException the service is null, or the cluster name is
+   *                                  null, or the cluster name is illegal
+   * @author jifengnan 2019-04-26
+   * @since 1.0.1
+   */
+  public Cluster(String clusterName, Service service) {
+    this.setName(clusterName);
+    this.service = service;
+    validate();
+  }
+
+  public int getDefIPPort() {
+    // for compatibility with old entries
+    return defIPPort == -1 ? defCkport : defIPPort;
+  }
+
+  public void setDefIPPort(int defIPPort) {
+    if (defIPPort == 0) {
+      throw new IllegalArgumentException("defIPPort can not be 0");
+    }
+    this.defIPPort = defIPPort;
+  }
+
+  public List<Instance> allIPs() {
+    List<Instance> allInstances = new ArrayList<>();
+    allInstances.addAll(persistentInstances);
+    allInstances.addAll(ephemeralInstances);
+    return allInstances;
+  }
+
+  public List<Instance> allIPs(boolean ephemeral) {
+    return ephemeral ? new ArrayList<>(ephemeralInstances) : new ArrayList<>(persistentInstances);
+  }
+
+  public void init() {
+    if (inited) {
+      return;
+    }
+    // 创建一个健康检查任务
+    checkTask = new HealthCheckTask(this);
+
+    // 将健康检查任务放到线程池，将会被周期性调度（周期性靠 task 自己重新将自己放入线程池实现）
+    HealthCheckReactor.scheduleCheck(checkTask);
+    inited = true;
+  }
+
+  public void destroy() {
+    if (checkTask != null) {
+      checkTask.setCancelled(true);
+    }
+  }
+
+  public HealthCheckTask getHealthCheckTask() {
+    return checkTask;
+  }
+
+  public Service getService() {
+    return service;
+  }
+
+  /**
+   * Replace the service for the current cluster.
+   * <p>
+   * the service shouldn't be replaced. so if the service is not empty will
+   * nothing to do. (the service fields can be changed, but the service A
+   * shouldn't be replaced to service B). If the service of a cluster is required
+   * to replace, actually, a new cluster is required.
+   *
+   * @param service the new service
+   */
+  public void setService(Service service) {
+    if (this.service != null) {
+      return;
+    }
+    this.service = service;
+  }
+
+  /**
+   * this method has been deprecated, the service name shouldn't be changed.
+   *
+   * @param serviceName the service name
+   * @author jifengnan 2019-04-26
+   * @since 1.0.1
+   */
+  @Deprecated
+  @Override
+  public void setServiceName(String serviceName) {
+    super.setServiceName(serviceName);
+  }
+
+  /**
+   * Get the service name of the current cluster.
+   * <p>
+   * Note that the returned service name is not the name which set by
+   * {@link #setServiceName(String)}, but the name of the service to which the
+   * current cluster belongs.
+   *
+   * @return the service name of the current cluster.
+   */
+  @Override
+  public String getServiceName() {
+    if (service != null) {
+      return service.getName();
+    } else {
+      return super.getServiceName();
+    }
+  }
+
+  @Override
+  public Cluster clone() throws CloneNotSupportedException {
+    super.clone();
+    Cluster cluster = new Cluster(this.getName(), service);
+    cluster.setHealthChecker(getHealthChecker().clone());
+    cluster.persistentInstances = new HashSet<>();
+    cluster.checkTask = null;
+    cluster.metadata = new HashMap<>(metadata);
+    return cluster;
+  }
+
+  public void updateIPs(List<Instance> ips, boolean ephemeral) {
+
+    Set<Instance> toUpdateInstances = ephemeral ? ephemeralInstances : persistentInstances;
+
+    HashMap<String, Instance> oldIPMap = new HashMap<>(toUpdateInstances.size());
+
+    for (Instance ip : toUpdateInstances) {
+      oldIPMap.put(ip.getDatumKey(), ip);
     }
 
-    /**
-     * Create a cluster.
-     * <p>the cluster name cannot be null, and only the arabic numerals, letters and endashes are allowed.
-     *
-     * @param clusterName the cluster name
-     * @param service     the service to which the current cluster belongs
-     * @throws IllegalArgumentException the service is null, or the cluster name is null, or the cluster name is illegal
-     * @author jifengnan 2019-04-26
-     * @since 1.0.1
-     */
-    public Cluster(String clusterName, Service service) {
-        this.setName(clusterName);
-        this.service = service;
-        validate();
-    }
+    List<Instance> updatedIPs = updatedIPs(ips, oldIPMap.values());
+    if (updatedIPs.size() > 0) {
+      for (Instance ip : updatedIPs) {
+        Instance oldIP = oldIPMap.get(ip.getDatumKey());
 
-    public int getDefIPPort() {
-        // for compatibility with old entries
-        return defIPPort == -1 ? defCkport : defIPPort;
-    }
-
-    public void setDefIPPort(int defIPPort) {
-        if (defIPPort == 0) {
-            throw new IllegalArgumentException("defIPPort can not be 0");
+        // do not update the ip validation status of updated ips
+        // because the checker has the most precise result
+        // Only when ip is not marked, don't we update the health status of IP:
+        if (!ip.isMarked()) {
+          ip.setHealthy(oldIP.isHealthy());
         }
-        this.defIPPort = defIPPort;
-    }
 
-    public List<Instance> allIPs() {
-        List<Instance> allInstances = new ArrayList<>();
-        allInstances.addAll(persistentInstances);
-        allInstances.addAll(ephemeralInstances);
-        return allInstances;
-    }
-
-    public List<Instance> allIPs(boolean ephemeral) {
-        return ephemeral ? new ArrayList<>(ephemeralInstances) : new ArrayList<>(persistentInstances);
-    }
-
-    public void init() {
-        if (inited) {
-            return;
+        if (ip.isHealthy() != oldIP.isHealthy()) {
+          // ip validation status updated
+          Loggers.EVT_LOG.info("{} {SYNC} IP-{} {}:{}@{}", getService().getName(),
+              (ip.isHealthy() ? "ENABLED" : "DISABLED"), ip.getIp(), ip.getPort(), getName());
         }
-        checkTask = new HealthCheckTask(this);
 
-        HealthCheckReactor.scheduleCheck(checkTask);
-        inited = true;
-    }
-
-    public void destroy() {
-        if (checkTask != null) {
-            checkTask.setCancelled(true);
+        if (ip.getWeight() != oldIP.getWeight()) {
+          // ip validation status updated
+          Loggers.EVT_LOG.info("{} {SYNC} {IP-UPDATED} {}->{}", getService().getName(), oldIP.toString(),
+              ip.toString());
         }
+      }
     }
 
-    public HealthCheckTask getHealthCheckTask() {
-        return checkTask;
+    List<Instance> newIPs = subtract(ips, oldIPMap.values());
+    if (newIPs.size() > 0) {
+      Loggers.EVT_LOG.info("{} {SYNC} {IP-NEW} cluster: {}, new ips size: {}, content: {}", getService().getName(),
+          getName(), newIPs.size(), newIPs.toString());
+
+      for (Instance ip : newIPs) {
+        HealthCheckStatus.reset(ip);
+      }
     }
 
-    public Service getService() {
-        return service;
+    List<Instance> deadIPs = subtract(oldIPMap.values(), ips);
+
+    if (deadIPs.size() > 0) {
+      Loggers.EVT_LOG.info("{} {SYNC} {IP-DEAD} cluster: {}, dead ips size: {}, content: {}", getService().getName(),
+          getName(), deadIPs.size(), deadIPs.toString());
+
+      for (Instance ip : deadIPs) {
+        HealthCheckStatus.remv(ip);
+      }
     }
 
-    /**
-     * Replace the service for the current cluster.
-     * <p>  the service shouldn't be replaced. so if the service is not empty will nothing to do.
-     * (the service fields can be changed, but the service A shouldn't be replaced to service B).
-     * If the service of a cluster is required to replace, actually, a new cluster is required.
-     *
-     * @param service the new service
-     */
-    public void setService(Service service) {
-        if (this.service != null) {
-            return;
-        }
-        this.service = service;
+    toUpdateInstances = new HashSet<>(ips);
+
+    if (ephemeral) {
+      ephemeralInstances = toUpdateInstances;
+    } else {
+      persistentInstances = toUpdateInstances;
+    }
+  }
+
+  public List<Instance> updatedIPs(Collection<Instance> a, Collection<Instance> b) {
+
+    List<Instance> intersects = (List<Instance>) CollectionUtils.intersection(a, b);
+    Map<String, Instance> stringIPAddressMap = new ConcurrentHashMap<>(intersects.size());
+
+    for (Instance instance : intersects) {
+      stringIPAddressMap.put(instance.getIp() + ":" + instance.getPort(), instance);
     }
 
-    /**
-     * this method has been deprecated, the service name shouldn't be changed.
-     *
-     * @param serviceName the service name
-     * @author jifengnan  2019-04-26
-     * @since 1.0.1
-     */
-    @Deprecated
-    @Override
-    public void setServiceName(String serviceName) {
-        super.setServiceName(serviceName);
+    Map<String, Integer> intersectMap = new ConcurrentHashMap<>(a.size() + b.size());
+    Map<String, Instance> instanceMap = new ConcurrentHashMap<>(a.size());
+    Map<String, Instance> instanceMap1 = new ConcurrentHashMap<>(a.size());
+
+    for (Instance instance : b) {
+      if (stringIPAddressMap.containsKey(instance.getIp() + ":" + instance.getPort())) {
+        intersectMap.put(instance.toString(), 1);
+      }
     }
 
-    /**
-     * Get the service name of the current cluster.
-     * <p>Note that the returned service name is not the name which set by {@link #setServiceName(String)},
-     * but the name of the service to which the current cluster belongs.
-     *
-     * @return the service name of the current cluster.
-     */
-    @Override
-    public String getServiceName() {
-        if (service != null) {
-            return service.getName();
+    for (Instance instance : a) {
+      if (stringIPAddressMap.containsKey(instance.getIp() + ":" + instance.getPort())) {
+
+        if (intersectMap.containsKey(instance.toString())) {
+          intersectMap.put(instance.toString(), 2);
         } else {
-            return super.getServiceName();
+          intersectMap.put(instance.toString(), 1);
         }
+      }
+
+      instanceMap1.put(instance.toString(), instance);
+
     }
 
-    @Override
-    public Cluster clone() throws CloneNotSupportedException {
-        super.clone();
-        Cluster cluster = new Cluster(this.getName(), service);
-        cluster.setHealthChecker(getHealthChecker().clone());
-        cluster.persistentInstances = new HashSet<>();
-        cluster.checkTask = null;
-        cluster.metadata = new HashMap<>(metadata);
-        return cluster;
+    for (Map.Entry<String, Integer> entry : intersectMap.entrySet()) {
+      String key = entry.getKey();
+      Integer value = entry.getValue();
+
+      if (value == 1) {
+        if (instanceMap1.containsKey(key)) {
+          instanceMap.put(key, instanceMap1.get(key));
+        }
+      }
     }
 
-    public void updateIPs(List<Instance> ips, boolean ephemeral) {
+    return new ArrayList<>(instanceMap.values());
+  }
 
-        Set<Instance> toUpdateInstances = ephemeral ? ephemeralInstances : persistentInstances;
-
-        HashMap<String, Instance> oldIPMap = new HashMap<>(toUpdateInstances.size());
-
-        for (Instance ip : toUpdateInstances) {
-            oldIPMap.put(ip.getDatumKey(), ip);
-        }
-
-        List<Instance> updatedIPs = updatedIPs(ips, oldIPMap.values());
-        if (updatedIPs.size() > 0) {
-            for (Instance ip : updatedIPs) {
-                Instance oldIP = oldIPMap.get(ip.getDatumKey());
-
-                // do not update the ip validation status of updated ips
-                // because the checker has the most precise result
-                // Only when ip is not marked, don't we update the health status of IP:
-                if (!ip.isMarked()) {
-                    ip.setHealthy(oldIP.isHealthy());
-                }
-
-                if (ip.isHealthy() != oldIP.isHealthy()) {
-                    // ip validation status updated
-                    Loggers.EVT_LOG.info("{} {SYNC} IP-{} {}:{}@{}",
-                        getService().getName(), (ip.isHealthy() ? "ENABLED" : "DISABLED"), ip.getIp(), ip.getPort(), getName());
-                }
-
-                if (ip.getWeight() != oldIP.getWeight()) {
-                    // ip validation status updated
-                    Loggers.EVT_LOG.info("{} {SYNC} {IP-UPDATED} {}->{}", getService().getName(), oldIP.toString(), ip.toString());
-                }
-            }
-        }
-
-        List<Instance> newIPs = subtract(ips, oldIPMap.values());
-        if (newIPs.size() > 0) {
-            Loggers.EVT_LOG.info("{} {SYNC} {IP-NEW} cluster: {}, new ips size: {}, content: {}",
-                getService().getName(), getName(), newIPs.size(), newIPs.toString());
-
-            for (Instance ip : newIPs) {
-                HealthCheckStatus.reset(ip);
-            }
-        }
-
-        List<Instance> deadIPs = subtract(oldIPMap.values(), ips);
-
-        if (deadIPs.size() > 0) {
-            Loggers.EVT_LOG.info("{} {SYNC} {IP-DEAD} cluster: {}, dead ips size: {}, content: {}",
-                getService().getName(), getName(), deadIPs.size(), deadIPs.toString());
-
-            for (Instance ip : deadIPs) {
-                HealthCheckStatus.remv(ip);
-            }
-        }
-
-        toUpdateInstances = new HashSet<>(ips);
-
-        if (ephemeral) {
-            ephemeralInstances = toUpdateInstances;
-        } else {
-            persistentInstances = toUpdateInstances;
-        }
+  public List<Instance> subtract(Collection<Instance> a, Collection<Instance> b) {
+    Map<String, Instance> mapa = new HashMap<>(b.size());
+    for (Instance o : b) {
+      mapa.put(o.getIp() + ":" + o.getPort(), o);
     }
 
-    public List<Instance> updatedIPs(Collection<Instance> a, Collection<Instance> b) {
+    List<Instance> result = new ArrayList<>();
 
-        List<Instance> intersects = (List<Instance>) CollectionUtils.intersection(a, b);
-        Map<String, Instance> stringIPAddressMap = new ConcurrentHashMap<>(intersects.size());
-
-        for (Instance instance : intersects) {
-            stringIPAddressMap.put(instance.getIp() + ":" + instance.getPort(), instance);
-        }
-
-        Map<String, Integer> intersectMap = new ConcurrentHashMap<>(a.size() + b.size());
-        Map<String, Instance> instanceMap = new ConcurrentHashMap<>(a.size());
-        Map<String, Instance> instanceMap1 = new ConcurrentHashMap<>(a.size());
-
-        for (Instance instance : b) {
-            if (stringIPAddressMap.containsKey(instance.getIp() + ":" + instance.getPort())) {
-                intersectMap.put(instance.toString(), 1);
-            }
-        }
-
-
-        for (Instance instance : a) {
-            if (stringIPAddressMap.containsKey(instance.getIp() + ":" + instance.getPort())) {
-
-                if (intersectMap.containsKey(instance.toString())) {
-                    intersectMap.put(instance.toString(), 2);
-                } else {
-                    intersectMap.put(instance.toString(), 1);
-                }
-            }
-
-            instanceMap1.put(instance.toString(), instance);
-
-        }
-
-        for (Map.Entry<String, Integer> entry : intersectMap.entrySet()) {
-            String key = entry.getKey();
-            Integer value = entry.getValue();
-
-            if (value == 1) {
-                if (instanceMap1.containsKey(key)) {
-                    instanceMap.put(key, instanceMap1.get(key));
-                }
-            }
-        }
-
-        return new ArrayList<>(instanceMap.values());
+    for (Instance o : a) {
+      if (!mapa.containsKey(o.getIp() + ":" + o.getPort())) {
+        result.add(o);
+      }
     }
 
-    public List<Instance> subtract(Collection<Instance> a, Collection<Instance> b) {
-        Map<String, Instance> mapa = new HashMap<>(b.size());
-        for (Instance o : b) {
-            mapa.put(o.getIp() + ":" + o.getPort(), o);
-        }
+    return result;
+  }
 
-        List<Instance> result = new ArrayList<>();
+  @Override
+  public int hashCode() {
+    return new HashCodeBuilder(17, 37).append(getName()).append(service).toHashCode();
+  }
 
-        for (Instance o : a) {
-            if (!mapa.containsKey(o.getIp() + ":" + o.getPort())) {
-                result.add(o);
-            }
-        }
-
-        return result;
+  @Override
+  public boolean equals(Object o) {
+    if (this == o) {
+      return true;
     }
 
-    @Override
-    public int hashCode() {
-        return new HashCodeBuilder(17, 37)
-            .append(getName())
-            .append(service)
-            .toHashCode();
+    if (o == null || getClass() != o.getClass()) {
+      return false;
     }
 
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) {
-            return true;
-        }
+    Cluster cluster = (Cluster) o;
 
-        if (o == null || getClass() != o.getClass()) {
-            return false;
-        }
+    return new EqualsBuilder().append(getName(), cluster.getName()).append(service, cluster.service).isEquals();
+  }
 
-        Cluster cluster = (Cluster) o;
+  public int getDefCkport() {
+    return defCkport;
+  }
 
-        return new EqualsBuilder()
-            .append(getName(), cluster.getName())
-            .append(service, cluster.service)
-            .isEquals();
+  public void setDefCkport(int defCkport) {
+    this.defCkport = defCkport;
+  }
+
+  public void update(Cluster cluster) {
+
+    if (!getHealthChecker().equals(cluster.getHealthChecker())) {
+      Loggers.SRV_LOG.info("[CLUSTER-UPDATE] {}:{}:, healthChecker: {} -> {}", getService().getName(), getName(),
+          getHealthChecker().toString(), cluster.getHealthChecker().toString());
+      setHealthChecker(cluster.getHealthChecker());
     }
 
-    public int getDefCkport() {
-        return defCkport;
+    if (defCkport != cluster.getDefCkport()) {
+      Loggers.SRV_LOG.info("[CLUSTER-UPDATE] {}:{}, defCkport: {} -> {}", getService().getName(), getName(), defCkport,
+          cluster.getDefCkport());
+      defCkport = cluster.getDefCkport();
     }
 
-    public void setDefCkport(int defCkport) {
-        this.defCkport = defCkport;
+    if (defIPPort != cluster.getDefIPPort()) {
+      Loggers.SRV_LOG.info("[CLUSTER-UPDATE] {}:{}, defIPPort: {} -> {}", getService().getName(), getName(), defIPPort,
+          cluster.getDefIPPort());
+      defIPPort = cluster.getDefIPPort();
     }
 
-    public void update(Cluster cluster) {
-
-        if (!getHealthChecker().equals(cluster.getHealthChecker())) {
-            Loggers.SRV_LOG.info("[CLUSTER-UPDATE] {}:{}:, healthChecker: {} -> {}",
-                getService().getName(), getName(), getHealthChecker().toString(), cluster.getHealthChecker().toString());
-            setHealthChecker(cluster.getHealthChecker());
-        }
-
-        if (defCkport != cluster.getDefCkport()) {
-            Loggers.SRV_LOG.info("[CLUSTER-UPDATE] {}:{}, defCkport: {} -> {}",
-                getService().getName(), getName(), defCkport, cluster.getDefCkport());
-            defCkport = cluster.getDefCkport();
-        }
-
-        if (defIPPort != cluster.getDefIPPort()) {
-            Loggers.SRV_LOG.info("[CLUSTER-UPDATE] {}:{}, defIPPort: {} -> {}",
-                getService().getName(), getName(), defIPPort, cluster.getDefIPPort());
-            defIPPort = cluster.getDefIPPort();
-        }
-
-        if (!StringUtils.equals(sitegroup, cluster.getSitegroup())) {
-            Loggers.SRV_LOG.info("[CLUSTER-UPDATE] {}:{}, sitegroup: {} -> {}",
-                getService().getName(), getName(), sitegroup, cluster.getSitegroup());
-            sitegroup = cluster.getSitegroup();
-        }
-
-        if (isUseIPPort4Check() != cluster.isUseIPPort4Check()) {
-            Loggers.SRV_LOG.info("[CLUSTER-UPDATE] {}:{}, useIPPort4Check: {} -> {}",
-                getService().getName(), getName(), isUseIPPort4Check(), cluster.isUseIPPort4Check());
-            setUseIPPort4Check(cluster.isUseIPPort4Check());
-        }
-
-        metadata = cluster.getMetadata();
+    if (!StringUtils.equals(sitegroup, cluster.getSitegroup())) {
+      Loggers.SRV_LOG.info("[CLUSTER-UPDATE] {}:{}, sitegroup: {} -> {}", getService().getName(), getName(), sitegroup,
+          cluster.getSitegroup());
+      sitegroup = cluster.getSitegroup();
     }
 
-    public String getSitegroup() {
-        return sitegroup;
+    if (isUseIPPort4Check() != cluster.isUseIPPort4Check()) {
+      Loggers.SRV_LOG.info("[CLUSTER-UPDATE] {}:{}, useIPPort4Check: {} -> {}", getService().getName(), getName(),
+          isUseIPPort4Check(), cluster.isUseIPPort4Check());
+      setUseIPPort4Check(cluster.isUseIPPort4Check());
     }
 
-    public void setSitegroup(String sitegroup) {
-        this.sitegroup = sitegroup;
-    }
+    metadata = cluster.getMetadata();
+  }
 
-    public boolean contains(Instance ip) {
-        return persistentInstances.contains(ip) || ephemeralInstances.contains(ip);
-    }
+  public String getSitegroup() {
+    return sitegroup;
+  }
 
-    /**
-     * validate the current cluster.
-     * <p>the cluster name cannot be null, and only the arabic numerals, letters and endashes are allowed.
-     *
-     * @throws IllegalArgumentException the service is null, or the cluster name is null, or the cluster name is illegal
-     */
-    public void validate() {
-        Assert.notNull(getName(), "cluster name cannot be null");
-        Assert.notNull(service, "service cannot be null");
-        if (!getName().matches(CLUSTER_NAME_SYNTAX)) {
-            throw new IllegalArgumentException("cluster name can only have these characters: 0-9a-zA-Z-, current: " + getName());
-        }
+  public void setSitegroup(String sitegroup) {
+    this.sitegroup = sitegroup;
+  }
+
+  public boolean contains(Instance ip) {
+    return persistentInstances.contains(ip) || ephemeralInstances.contains(ip);
+  }
+
+  /**
+   * validate the current cluster.
+   * <p>
+   * the cluster name cannot be null, and only the arabic numerals, letters and
+   * endashes are allowed.
+   *
+   * @throws IllegalArgumentException the service is null, or the cluster name is
+   *                                  null, or the cluster name is illegal
+   */
+  public void validate() {
+    Assert.notNull(getName(), "cluster name cannot be null");
+    Assert.notNull(service, "service cannot be null");
+    if (!getName().matches(CLUSTER_NAME_SYNTAX)) {
+      throw new IllegalArgumentException(
+          "cluster name can only have these characters: 0-9a-zA-Z-, current: " + getName());
     }
+  }
 }

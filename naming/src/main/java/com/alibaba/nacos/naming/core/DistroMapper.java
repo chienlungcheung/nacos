@@ -31,89 +31,114 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
+ * DistroMapper 负责监听服务对应的健康实例列表变更
+ * 
  * @author nkorange
  */
 @Component("distroMapper")
 public class DistroMapper implements ServerChangeListener {
 
-    private List<String> healthyList = new ArrayList<>();
+  /**
+   * healthyList 保存当前最新的可达实例列表，列表每个元素是实例的 key（即 IP:Port）
+   */
+  private List<String> healthyList = new ArrayList<>();
 
-    public List<String> getHealthyList() {
-        return healthyList;
+  public List<String> getHealthyList() {
+    return healthyList;
+  }
+
+  @Autowired
+  private SwitchDomain switchDomain;
+
+  @Autowired
+  private ServerListManager serverListManager;
+
+  /**
+   * init server list
+   */
+  @PostConstruct
+  public void init() {
+    serverListManager.listen(this);
+  }
+
+  public boolean responsible(Cluster cluster, Instance instance) {
+    return switchDomain.isHealthCheckEnabled(cluster.getServiceName()) && !cluster.getHealthCheckTask().isCancelled()
+        && responsible(cluster.getServiceName()) && cluster.contains(instance);
+  }
+
+  /**
+   * 确认当前 nacos 实例是否负责管理名为 serviceName 的服务
+   * 
+   * @param serviceName
+   * @return
+   */
+  public boolean responsible(String serviceName) {
+    if (!switchDomain.isDistroEnabled() || SystemUtils.STANDALONE_MODE) {
+      return true;
     }
 
-    @Autowired
-    private SwitchDomain switchDomain;
-
-    @Autowired
-    private ServerListManager serverListManager;
-
-    /**
-     * init server list
-     */
-    @PostConstruct
-    public void init() {
-        serverListManager.listen(this);
+    if (CollectionUtils.isEmpty(healthyList)) {
+      // means distro config is not ready yet
+      return false;
     }
 
-    public boolean responsible(Cluster cluster, Instance instance) {
-        return switchDomain.isHealthCheckEnabled(cluster.getServiceName())
-            && !cluster.getHealthCheckTask().isCancelled()
-            && responsible(cluster.getServiceName())
-            && cluster.contains(instance);
+    // 取出当前 nacos 实例在健康列表中的索引值
+    int index = healthyList.indexOf(NetUtils.localServer());
+    int lastIndex = healthyList.lastIndexOf(NetUtils.localServer());
+    if (lastIndex < 0 || index < 0) {
+      return true;
     }
 
-    public boolean responsible(String serviceName) {
-        if (!switchDomain.isDistroEnabled() || SystemUtils.STANDALONE_MODE) {
-            return true;
-        }
+    int target = distroHash(serviceName) % healthyList.size();
+    return target >= index && target <= lastIndex;
+  }
 
-        if (CollectionUtils.isEmpty(healthyList)) {
-            // means distro config is not ready yet
-            return false;
-        }
-
-        int index = healthyList.indexOf(NetUtils.localServer());
-        int lastIndex = healthyList.lastIndexOf(NetUtils.localServer());
-        if (lastIndex < 0 || index < 0) {
-            return true;
-        }
-
-        int target = distroHash(serviceName) % healthyList.size();
-        return target >= index && target <= lastIndex;
+  /**
+   * 确认 serviceName 对应的服务由哪个 nacos 实例管理，返回它的 ip:port
+   * 
+   * @param serviceName
+   * @return
+   */
+  public String mapSrv(String serviceName) {
+    if (CollectionUtils.isEmpty(healthyList) || !switchDomain.isDistroEnabled()) {
+      return NetUtils.localServer();
     }
 
-    public String mapSrv(String serviceName) {
-        if (CollectionUtils.isEmpty(healthyList) || !switchDomain.isDistroEnabled()) {
-            return NetUtils.localServer();
-        }
+    try {
+      return healthyList.get(distroHash(serviceName) % healthyList.size());
+    } catch (Exception e) {
+      Loggers.SRV_LOG.warn("distro mapper failed, return localhost: " + NetUtils.localServer(), e);
 
-        try {
-            return healthyList.get(distroHash(serviceName) % healthyList.size());
-        } catch (Exception e) {
-            Loggers.SRV_LOG.warn("distro mapper failed, return localhost: " + NetUtils.localServer(), e);
-
-            return NetUtils.localServer();
-        }
+      return NetUtils.localServer();
     }
+  }
 
-    public int distroHash(String serviceName) {
-        return Math.abs(serviceName.hashCode() % Integer.MAX_VALUE);
+  /**
+   * 根据服务名称生成哈希值
+   * 
+   * @param serviceName
+   * @return
+   */
+  public int distroHash(String serviceName) {
+    return Math.abs(serviceName.hashCode() % Integer.MAX_VALUE);
+  }
+
+  @Override
+  public void onChangeServerList(List<Server> latestMembers) {
+
+  }
+
+  /**
+   * onChangeHealthyServerList 负责使用最新的可达实例列表替换本地保存的旧的实例列表。
+   */
+  @Override
+  public void onChangeHealthyServerList(List<Server> latestReachableMembers) {
+
+    // 用新的集群可达成员列表替换本地可达列表
+    List<String> newHealthyList = new ArrayList<>();
+    for (Server server : latestReachableMembers) {
+      newHealthyList.add(server.getKey());
     }
-
-    @Override
-    public void onChangeServerList(List<Server> latestMembers) {
-
-    }
-
-    @Override
-    public void onChangeHealthyServerList(List<Server> latestReachableMembers) {
-
-        // 用新的集群可达成员列表替换本地可达列表
-        List<String> newHealthyList = new ArrayList<>();
-        for (Server server : latestReachableMembers) {
-            newHealthyList.add(server.getKey());
-        }
-        healthyList = newHealthyList;
-    }
+    healthyList = newHealthyList;
+  }
 }

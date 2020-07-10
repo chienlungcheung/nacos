@@ -20,7 +20,9 @@ import java.util.Map;
 
 /**
  * Cluster
- *
+ * <p>
+ * 另一个派生见 naming.core.Cluster
+ * 
  * @author nkorange
  */
 public class Cluster {
@@ -52,6 +54,8 @@ public class Cluster {
 
     /**
      * Whether or not use instance port to do health check.
+     * <p>
+     * 是否使用服务实例本身对外服务的端口作为健康检查的目的接口。
      */
     private boolean useIPPort4Check = true;
 

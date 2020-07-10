@@ -17,7 +17,9 @@ package com.alibaba.nacos.naming.cluster;
 
 /**
  * A flag to indicate the exact status of a server.
- *
+ * <p>
+ * 服务器状态
+ * 
  * @author nkorange
  * @since 1.0.0
  */
@@ -32,10 +34,14 @@ public enum ServerStatus {
     DOWN,
     /**
      * server is preparing itself for request, usually 'UP' is the next status
+     * <p>
+     * 准备中，下个状态就是 UP
      */
     STARTING,
     /**
      * server is manually paused
+     * <p>
+     * 服务实例被手工暂停
      */
     PAUSED,
     /**

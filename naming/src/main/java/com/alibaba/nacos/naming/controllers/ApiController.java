@@ -47,104 +47,103 @@ import java.util.*;
 @RequestMapping(UtilsAndCommons.NACOS_NAMING_CONTEXT + "/api")
 public class ApiController extends InstanceController {
 
-    @Autowired
-    private DistroMapper distroMapper;
+  @Autowired
+  private DistroMapper distroMapper;
 
-    @Autowired
-    private ServiceManager serviceManager;
+  @Autowired
+  private ServiceManager serviceManager;
 
-    @RequestMapping("/allDomNames")
-    public JSONObject allDomNames(HttpServletRequest request) throws Exception {
+  @RequestMapping("/allDomNames")
+  public JSONObject allDomNames(HttpServletRequest request) throws Exception {
 
-        boolean responsibleOnly = Boolean.parseBoolean(WebUtils.optional(request, "responsibleOnly", "false"));
-        Map<String, Set<String>> domMap = serviceManager.getAllServiceNames();
-        JSONObject result = new JSONObject();
-        // For old DNS-F client:
-        String dnsfVersion = "1.0.1";
-        String agent = request.getHeader("Client-Version");
-        ClientInfo clientInfo = new ClientInfo(agent);
-        if (clientInfo.type == ClientInfo.ClientType.DNS &&
-            clientInfo.version.compareTo(VersionUtil.parseVersion(dnsfVersion)) <= 0) {
+    boolean responsibleOnly = Boolean.parseBoolean(WebUtils.optional(request, "responsibleOnly", "false"));
+    Map<String, Set<String>> domMap = serviceManager.getAllServiceNames();
+    JSONObject result = new JSONObject();
+    // For old DNS-F client:
+    String dnsfVersion = "1.0.1";
+    String agent = request.getHeader("Client-Version");
+    ClientInfo clientInfo = new ClientInfo(agent);
+    if (clientInfo.type == ClientInfo.ClientType.DNS
+        && clientInfo.version.compareTo(VersionUtil.parseVersion(dnsfVersion)) <= 0) {
 
-            List<String> doms = new ArrayList<String>();
-            Set<String> domSet = null;
+      List<String> doms = new ArrayList<String>();
+      Set<String> domSet = null;
 
-            if (domMap.containsKey(Constants.DEFAULT_NAMESPACE_ID)) {
-                domSet = domMap.get(Constants.DEFAULT_NAMESPACE_ID);
-            }
+      if (domMap.containsKey(Constants.DEFAULT_NAMESPACE_ID)) {
+        domSet = domMap.get(Constants.DEFAULT_NAMESPACE_ID);
+      }
 
-            if (CollectionUtils.isEmpty(domSet)) {
-                result.put("doms", new HashSet<>());
-                result.put("count", 0);
-                return result;
-            }
-
-            for (String dom : domSet) {
-                if (distroMapper.responsible(dom) || !responsibleOnly) {
-                    doms.add(NamingUtils.getServiceName(dom));
-                }
-            }
-
-            result.put("doms", doms);
-            result.put("count", doms.size());
-            return result;
-        }
-
-        Map<String, Set<String>> doms = new HashMap<>(16);
-        int count = 0;
-        for (String namespaceId : domMap.keySet()) {
-            doms.put(namespaceId, new HashSet<>());
-            for (String dom : domMap.get(namespaceId)) {
-                if (distroMapper.responsible(dom) || !responsibleOnly) {
-                    doms.get(namespaceId).add(NamingUtils.getServiceName(dom));
-                }
-            }
-            count += doms.get(namespaceId).size();
-        }
-
-        result.put("doms", doms);
-        result.put("count", count);
-
+      if (CollectionUtils.isEmpty(domSet)) {
+        result.put("doms", new HashSet<>());
+        result.put("count", 0);
         return result;
+      }
+
+      for (String dom : domSet) {
+        if (distroMapper.responsible(dom) || !responsibleOnly) {
+          doms.add(NamingUtils.getServiceName(dom));
+        }
+      }
+
+      result.put("doms", doms);
+      result.put("count", doms.size());
+      return result;
     }
 
-    @RequestMapping("/hello")
-    @ResponseBody
-    public String hello(HttpServletRequest request) throws Exception {
-        return "ok";
+    Map<String, Set<String>> doms = new HashMap<>(16);
+    int count = 0;
+    for (String namespaceId : domMap.keySet()) {
+      doms.put(namespaceId, new HashSet<>());
+      for (String dom : domMap.get(namespaceId)) {
+        if (distroMapper.responsible(dom) || !responsibleOnly) {
+          doms.get(namespaceId).add(NamingUtils.getServiceName(dom));
+        }
+      }
+      count += doms.get(namespaceId).size();
     }
 
-    @RequestMapping("/srvIPXT")
-    @ResponseBody
-    public JSONObject srvIPXT(HttpServletRequest request) throws Exception {
+    result.put("doms", doms);
+    result.put("count", count);
 
-        String namespaceId = WebUtils.optional(request, CommonParams.NAMESPACE_ID,
-            Constants.DEFAULT_NAMESPACE_ID);
+    return result;
+  }
 
-        String dom = WebUtils.required(request, "dom");
-        String agent = request.getHeader("Client-Version");
-        String clusters = WebUtils.optional(request, "clusters", StringUtils.EMPTY);
-        String clientIP = WebUtils.optional(request, "clientIP", StringUtils.EMPTY);
-        Integer udpPort = Integer.parseInt(WebUtils.optional(request, "udpPort", "0"));
-        String env = WebUtils.optional(request, "env", StringUtils.EMPTY);
-        boolean isCheck = Boolean.parseBoolean(WebUtils.optional(request, "isCheck", "false"));
+  @RequestMapping("/hello")
+  @ResponseBody
+  public String hello(HttpServletRequest request) throws Exception {
+    return "ok";
+  }
 
-        String app = WebUtils.optional(request, "app", StringUtils.EMPTY);
+  @RequestMapping("/srvIPXT")
+  @ResponseBody
+  public JSONObject srvIPXT(HttpServletRequest request) throws Exception {
 
-        String tenant = WebUtils.optional(request, "tid", StringUtils.EMPTY);
+    String namespaceId = WebUtils.optional(request, CommonParams.NAMESPACE_ID, Constants.DEFAULT_NAMESPACE_ID);
 
-        boolean healthyOnly = Boolean.parseBoolean(WebUtils.optional(request, "healthyOnly", "false"));
+    String dom = WebUtils.required(request, "dom");
+    String agent = request.getHeader("Client-Version");
+    String clusters = WebUtils.optional(request, "clusters", StringUtils.EMPTY);
+    String clientIP = WebUtils.optional(request, "clientIP", StringUtils.EMPTY);
+    Integer udpPort = Integer.parseInt(WebUtils.optional(request, "udpPort", "0"));
+    String env = WebUtils.optional(request, "env", StringUtils.EMPTY);
+    boolean isCheck = Boolean.parseBoolean(WebUtils.optional(request, "isCheck", "false"));
 
-        return doSrvIPXT(namespaceId, NamingUtils.getGroupedName(dom, Constants.DEFAULT_GROUP),
-            agent, clusters, clientIP, udpPort, env, isCheck, app, tenant, healthyOnly);
-    }
+    String app = WebUtils.optional(request, "app", StringUtils.EMPTY);
 
-    @CanDistro
-    @RequestMapping("/clientBeat")
-    public JSONObject clientBeat(HttpServletRequest request) throws Exception {
-        OverrideParameterRequestWrapper requestWrapper = OverrideParameterRequestWrapper.buildRequest(request);
-        requestWrapper.addParameter(CommonParams.SERVICE_NAME,
-            Constants.DEFAULT_GROUP + Constants.SERVICE_INFO_SPLITER + WebUtils.required(request, "dom"));
-        return beat(requestWrapper);
-    }
+    String tenant = WebUtils.optional(request, "tid", StringUtils.EMPTY);
+
+    boolean healthyOnly = Boolean.parseBoolean(WebUtils.optional(request, "healthyOnly", "false"));
+
+    return doSrvIPXT(namespaceId, NamingUtils.getGroupedName(dom, Constants.DEFAULT_GROUP), agent, clusters, clientIP,
+        udpPort, env, isCheck, app, tenant, healthyOnly);
+  }
+
+  @CanDistro
+  @RequestMapping("/clientBeat")
+  public JSONObject clientBeat(HttpServletRequest request) throws Exception {
+    OverrideParameterRequestWrapper requestWrapper = OverrideParameterRequestWrapper.buildRequest(request);
+    requestWrapper.addParameter(CommonParams.SERVICE_NAME,
+        Constants.DEFAULT_GROUP + Constants.SERVICE_INFO_SPLITER + WebUtils.required(request, "dom"));
+    return beat(requestWrapper);
+  }
 }

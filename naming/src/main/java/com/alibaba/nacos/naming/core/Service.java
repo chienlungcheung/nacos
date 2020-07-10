@@ -43,472 +43,496 @@ import java.util.*;
 /**
  * Service of Nacos server side
  * <p>
- * We introduce a 'service --> cluster --> instance' model, in which service stores a list of clusters,
- * which contain a list of instances.
+ * We introduce a 'service --> cluster --> instance' model, in which service
+ * stores a list of clusters, which contain a list of instances.
  * <p>
- * This class inherits from Service in API module and stores some fields that do not have to expose to client.
- *
+ * This class inherits from Service in API module and stores some fields that do
+ * not have to expose to client.
+ * <p>
+ * nacos 中 service 包含一系列 clusters，后者包含一系列 instances。
+ * <p>
+ * service 的属性在 Web-UI 的 ServiceManagement->ServiceList 任意一个 Service->Details
+ * 可以看到。
+ * 
  * @author nkorange
  */
 public class Service extends com.alibaba.nacos.api.naming.pojo.Service implements Record, RecordListener<Instances> {
 
-    private static final String SERVICE_NAME_SYNTAX = "[0-9a-zA-Z@\\.:_-]+";
+  private static final String SERVICE_NAME_SYNTAX = "[0-9a-zA-Z@\\.:_-]+";
 
-    @JSONField(serialize = false)
-    private ClientBeatCheckTask clientBeatCheckTask = new ClientBeatCheckTask(this);
+  @JSONField(serialize = false)
+  private ClientBeatCheckTask clientBeatCheckTask = new ClientBeatCheckTask(this);
 
-    private String token;
-    private List<String> owners = new ArrayList<>();
-    private Boolean resetWeight = false;
-    private Boolean enabled = true;
-    private Selector selector = new NoneSelector();
-    private String namespaceId;
+  private String token;
+  private List<String> owners = new ArrayList<>();
+  private Boolean resetWeight = false;
+  private Boolean enabled = true;
+  private Selector selector = new NoneSelector();
+  private String namespaceId;
 
-    /**
-     * IP will be deleted if it has not send beat for some time, default timeout is 30 seconds.
-     */
-    private long ipDeleteTimeout = 30 * 1000;
+  /**
+   * IP will be deleted if it has not send beat for some time, default timeout is
+   * 30 seconds.
+   */
+  private long ipDeleteTimeout = 30 * 1000;
 
-    private volatile long lastModifiedMillis = 0L;
+  private volatile long lastModifiedMillis = 0L;
 
-    private volatile String checksum;
+  private volatile String checksum;
 
-    /**
-     * TODO set customized push expire time:
-     */
-    private long pushCacheMillis = 0L;
+  /**
+   * TODO set customized push expire time:
+   */
+  private long pushCacheMillis = 0L;
 
-    private Map<String, Cluster> clusterMap = new HashMap<>();
+  private Map<String, Cluster> clusterMap = new HashMap<>();
 
-    public Service() {
+  public Service() {
+  }
+
+  public Service(String name) {
+    super(name);
+  }
+
+  @JSONField(serialize = false)
+  public PushService getPushService() {
+    return SpringContext.getAppContext().getBean(PushService.class);
+  }
+
+  public long getIpDeleteTimeout() {
+    return ipDeleteTimeout;
+  }
+
+  public void setIpDeleteTimeout(long ipDeleteTimeout) {
+    this.ipDeleteTimeout = ipDeleteTimeout;
+  }
+
+  /**
+   * 处理从 instance/beat 接口接收到的客户端（即 instance）的心跳。
+   * 
+   * @param rsInfo
+   */
+  public void processClientBeat(final RsInfo rsInfo) {
+    ClientBeatProcessor clientBeatProcessor = new ClientBeatProcessor();
+    clientBeatProcessor.setService(this);
+    clientBeatProcessor.setRsInfo(rsInfo);
+    HealthCheckReactor.scheduleNow(clientBeatProcessor);
+  }
+
+  public Boolean getEnabled() {
+    return enabled;
+  }
+
+  public void setEnabled(Boolean enabled) {
+    this.enabled = enabled;
+  }
+
+  public long getLastModifiedMillis() {
+    return lastModifiedMillis;
+  }
+
+  public void setLastModifiedMillis(long lastModifiedMillis) {
+    this.lastModifiedMillis = lastModifiedMillis;
+  }
+
+  public Boolean getResetWeight() {
+    return resetWeight;
+  }
+
+  public void setResetWeight(Boolean resetWeight) {
+    this.resetWeight = resetWeight;
+  }
+
+  public Selector getSelector() {
+    return selector;
+  }
+
+  public void setSelector(Selector selector) {
+    this.selector = selector;
+  }
+
+  @Override
+  public boolean interests(String key) {
+    return KeyBuilder.matchInstanceListKey(key, namespaceId, getName());
+  }
+
+  @Override
+  public boolean matchUnlistenKey(String key) {
+    return KeyBuilder.matchInstanceListKey(key, namespaceId, getName());
+  }
+
+  /**
+   * Service.onChange 负责监听所属自己的 Instances 的变更事件，更新 ip 列表重新计算校验和等。
+   */
+  @Override
+  public void onChange(String key, Instances value) throws Exception {
+
+    Loggers.SRV_LOG.info("[NACOS-RAFT] datum is changed, key: {}, value: {}", key, value);
+
+    for (Instance instance : value.getInstanceList()) {
+
+      if (instance == null) {
+        // Reject this abnormal instance list:
+        throw new RuntimeException("got null instance " + key);
+      }
+
+      if (instance.getWeight() > 10000.0D) {
+        instance.setWeight(10000.0D);
+      }
+
+      if (instance.getWeight() < 0.01D && instance.getWeight() > 0.0D) {
+        instance.setWeight(0.01D);
+      }
     }
 
-    public Service(String name) {
-        super(name);
+    updateIPs(value.getInstanceList(), KeyBuilder.matchEphemeralInstanceListKey(key));
+
+    recalculateChecksum();
+  }
+
+  @Override
+  public void onDelete(String key) throws Exception {
+    // ignore
+  }
+
+  public int healthyInstanceCount() {
+
+    int healthyCount = 0;
+    for (Instance instance : allIPs()) {
+      if (instance.isHealthy()) {
+        healthyCount++;
+      }
+    }
+    return healthyCount;
+  }
+
+  public boolean meetProtectThreshold() {
+    return (healthyInstanceCount() * 1.0 / allIPs().size()) <= getProtectThreshold();
+  }
+
+  public void updateIPs(Collection<Instance> instances, boolean ephemeral) {
+    Map<String, List<Instance>> ipMap = new HashMap<>(clusterMap.size());
+    for (String clusterName : clusterMap.keySet()) {
+      ipMap.put(clusterName, new ArrayList<>());
     }
 
-    @JSONField(serialize = false)
-    public PushService getPushService() {
-        return SpringContext.getAppContext().getBean(PushService.class);
-    }
-
-    public long getIpDeleteTimeout() {
-        return ipDeleteTimeout;
-    }
-
-    public void setIpDeleteTimeout(long ipDeleteTimeout) {
-        this.ipDeleteTimeout = ipDeleteTimeout;
-    }
-
-    public void processClientBeat(final RsInfo rsInfo) {
-        ClientBeatProcessor clientBeatProcessor = new ClientBeatProcessor();
-        clientBeatProcessor.setService(this);
-        clientBeatProcessor.setRsInfo(rsInfo);
-        HealthCheckReactor.scheduleNow(clientBeatProcessor);
-    }
-
-    public Boolean getEnabled() {
-        return enabled;
-    }
-
-    public void setEnabled(Boolean enabled) {
-        this.enabled = enabled;
-    }
-
-    public long getLastModifiedMillis() {
-        return lastModifiedMillis;
-    }
-
-    public void setLastModifiedMillis(long lastModifiedMillis) {
-        this.lastModifiedMillis = lastModifiedMillis;
-    }
-
-    public Boolean getResetWeight() {
-        return resetWeight;
-    }
-
-    public void setResetWeight(Boolean resetWeight) {
-        this.resetWeight = resetWeight;
-    }
-
-    public Selector getSelector() {
-        return selector;
-    }
-
-    public void setSelector(Selector selector) {
-        this.selector = selector;
-    }
-
-    @Override
-    public boolean interests(String key) {
-        return KeyBuilder.matchInstanceListKey(key, namespaceId, getName());
-    }
-
-    @Override
-    public boolean matchUnlistenKey(String key) {
-        return KeyBuilder.matchInstanceListKey(key, namespaceId, getName());
-    }
-
-    @Override
-    public void onChange(String key, Instances value) throws Exception {
-
-        Loggers.SRV_LOG.info("[NACOS-RAFT] datum is changed, key: {}, value: {}", key, value);
-
-        for (Instance instance : value.getInstanceList()) {
-
-            if (instance == null) {
-                // Reject this abnormal instance list:
-                throw new RuntimeException("got null instance " + key);
-            }
-
-            if (instance.getWeight() > 10000.0D) {
-                instance.setWeight(10000.0D);
-            }
-
-            if (instance.getWeight() < 0.01D && instance.getWeight() > 0.0D) {
-                instance.setWeight(0.01D);
-            }
+    for (Instance instance : instances) {
+      try {
+        if (instance == null) {
+          Loggers.SRV_LOG.error("[NACOS-DOM] received malformed ip: null");
+          continue;
         }
 
-        updateIPs(value.getInstanceList(), KeyBuilder.matchEphemeralInstanceListKey(key));
-
-        recalculateChecksum();
-    }
-
-    @Override
-    public void onDelete(String key) throws Exception {
-        // ignore
-    }
-
-    public int healthyInstanceCount() {
-
-        int healthyCount = 0;
-        for (Instance instance : allIPs()) {
-            if (instance.isHealthy()) {
-                healthyCount++;
-            }
-        }
-        return healthyCount;
-    }
-
-    public boolean meetProtectThreshold() {
-        return (healthyInstanceCount() * 1.0 / allIPs().size()) <= getProtectThreshold();
-    }
-
-    public void updateIPs(Collection<Instance> instances, boolean ephemeral) {
-        Map<String, List<Instance>> ipMap = new HashMap<>(clusterMap.size());
-        for (String clusterName : clusterMap.keySet()) {
-            ipMap.put(clusterName, new ArrayList<>());
+        if (StringUtils.isEmpty(instance.getClusterName())) {
+          instance.setClusterName(UtilsAndCommons.DEFAULT_CLUSTER_NAME);
         }
 
-        for (Instance instance : instances) {
-            try {
-                if (instance == null) {
-                    Loggers.SRV_LOG.error("[NACOS-DOM] received malformed ip: null");
-                    continue;
-                }
-
-                if (StringUtils.isEmpty(instance.getClusterName())) {
-                    instance.setClusterName(UtilsAndCommons.DEFAULT_CLUSTER_NAME);
-                }
-
-                if (!clusterMap.containsKey(instance.getClusterName())) {
-                    Loggers.SRV_LOG.warn("cluster: {} not found, ip: {}, will create new cluster with default configuration.",
-                        instance.getClusterName(), instance.toJSON());
-                    Cluster cluster = new Cluster(instance.getClusterName(), this);
-                    cluster.init();
-                    getClusterMap().put(instance.getClusterName(), cluster);
-                }
-
-                List<Instance> clusterIPs = ipMap.get(instance.getClusterName());
-                if (clusterIPs == null) {
-                    clusterIPs = new LinkedList<>();
-                    ipMap.put(instance.getClusterName(), clusterIPs);
-                }
-
-                clusterIPs.add(instance);
-            } catch (Exception e) {
-                Loggers.SRV_LOG.error("[NACOS-DOM] failed to process ip: " + instance, e);
-            }
+        if (!clusterMap.containsKey(instance.getClusterName())) {
+          Loggers.SRV_LOG.warn("cluster: {} not found, ip: {}, will create new cluster with default configuration.",
+              instance.getClusterName(), instance.toJSON());
+          Cluster cluster = new Cluster(instance.getClusterName(), this);
+          cluster.init();
+          getClusterMap().put(instance.getClusterName(), cluster);
         }
 
-        for (Map.Entry<String, List<Instance>> entry : ipMap.entrySet()) {
-            //make every ip mine
-            List<Instance> entryIPs = entry.getValue();
-            clusterMap.get(entry.getKey()).updateIPs(entryIPs, ephemeral);
+        List<Instance> clusterIPs = ipMap.get(instance.getClusterName());
+        if (clusterIPs == null) {
+          clusterIPs = new LinkedList<>();
+          ipMap.put(instance.getClusterName(), clusterIPs);
         }
 
-        setLastModifiedMillis(System.currentTimeMillis());
-        getPushService().serviceChanged(this);
-        StringBuilder stringBuilder = new StringBuilder();
-
-        for (Instance instance : allIPs()) {
-            stringBuilder.append(instance.toIPAddr()).append("_").append(instance.isHealthy()).append(",");
-        }
-
-        Loggers.EVT_LOG.info("[IP-UPDATED] namespace: {}, service: {}, ips: {}",
-            getNamespaceId(), getName(), stringBuilder.toString());
-
+        clusterIPs.add(instance);
+      } catch (Exception e) {
+        Loggers.SRV_LOG.error("[NACOS-DOM] failed to process ip: " + instance, e);
+      }
     }
 
-    public void init() {
-
-        HealthCheckReactor.scheduleCheck(clientBeatCheckTask);
-
-        for (Map.Entry<String, Cluster> entry : clusterMap.entrySet()) {
-            entry.getValue().setService(this);
-            entry.getValue().init();
-        }
+    for (Map.Entry<String, List<Instance>> entry : ipMap.entrySet()) {
+      // make every ip mine
+      List<Instance> entryIPs = entry.getValue();
+      clusterMap.get(entry.getKey()).updateIPs(entryIPs, ephemeral);
     }
 
-    public void destroy() throws Exception {
-        for (Map.Entry<String, Cluster> entry : clusterMap.entrySet()) {
-            entry.getValue().destroy();
-        }
-        HealthCheckReactor.cancelCheck(clientBeatCheckTask);
+    setLastModifiedMillis(System.currentTimeMillis());
+    getPushService().serviceChanged(this);
+    StringBuilder stringBuilder = new StringBuilder();
+
+    for (Instance instance : allIPs()) {
+      stringBuilder.append(instance.toIPAddr()).append("_").append(instance.isHealthy()).append(",");
     }
 
-    public List<Instance> allIPs() {
-        List<Instance> allIPs = new ArrayList<>();
-        for (Map.Entry<String, Cluster> entry : clusterMap.entrySet()) {
-            allIPs.addAll(entry.getValue().allIPs());
-        }
+    Loggers.EVT_LOG.info("[IP-UPDATED] namespace: {}, service: {}, ips: {}", getNamespaceId(), getName(),
+        stringBuilder.toString());
 
-        return allIPs;
+  }
+
+  public void init() {
+
+    HealthCheckReactor.scheduleCheck(clientBeatCheckTask);
+
+    for (Map.Entry<String, Cluster> entry : clusterMap.entrySet()) {
+      entry.getValue().setService(this);
+      entry.getValue().init();
+    }
+  }
+
+  public void destroy() throws Exception {
+    for (Map.Entry<String, Cluster> entry : clusterMap.entrySet()) {
+      entry.getValue().destroy();
+    }
+    HealthCheckReactor.cancelCheck(clientBeatCheckTask);
+  }
+
+  public List<Instance> allIPs() {
+    List<Instance> allIPs = new ArrayList<>();
+    for (Map.Entry<String, Cluster> entry : clusterMap.entrySet()) {
+      allIPs.addAll(entry.getValue().allIPs());
     }
 
-    public List<Instance> allIPs(boolean ephemeral) {
-        List<Instance> allIPs = new ArrayList<>();
-        for (Map.Entry<String, Cluster> entry : clusterMap.entrySet()) {
-            allIPs.addAll(entry.getValue().allIPs(ephemeral));
-        }
+    return allIPs;
+  }
 
-        return allIPs;
+  public List<Instance> allIPs(boolean ephemeral) {
+    List<Instance> allIPs = new ArrayList<>();
+    for (Map.Entry<String, Cluster> entry : clusterMap.entrySet()) {
+      allIPs.addAll(entry.getValue().allIPs(ephemeral));
     }
 
-    public List<Instance> allIPs(List<String> clusters) {
-        List<Instance> allIPs = new ArrayList<>();
-        for (String cluster : clusters) {
-            Cluster clusterObj = clusterMap.get(cluster);
-            if (clusterObj == null) {
-                continue;
-            }
+    return allIPs;
+  }
 
-            allIPs.addAll(clusterObj.allIPs());
-        }
+  public List<Instance> allIPs(List<String> clusters) {
+    List<Instance> allIPs = new ArrayList<>();
+    for (String cluster : clusters) {
+      Cluster clusterObj = clusterMap.get(cluster);
+      if (clusterObj == null) {
+        continue;
+      }
 
-        return allIPs;
+      allIPs.addAll(clusterObj.allIPs());
     }
 
-    public List<Instance> srvIPs(List<String> clusters) {
-        if (CollectionUtils.isEmpty(clusters)) {
-            clusters = new ArrayList<>();
-            clusters.addAll(clusterMap.keySet());
-        }
-        return allIPs(clusters);
+    return allIPs;
+  }
+
+  public List<Instance> srvIPs(List<String> clusters) {
+    if (CollectionUtils.isEmpty(clusters)) {
+      clusters = new ArrayList<>();
+      clusters.addAll(clusterMap.keySet());
+    }
+    return allIPs(clusters);
+  }
+
+  public String toJSON() {
+    return JSON.toJSONString(this);
+  }
+
+  /**
+   * 把当前 Service 实例内容序列化为字符串形式
+   */
+  @JSONField(serialize = false)
+  public String getServiceString() {
+    Map<Object, Object> serviceObject = new HashMap<Object, Object>(10);
+    Service service = this;
+
+    serviceObject.put("name", service.getName());
+
+    List<Instance> ips = service.allIPs();
+    int invalidIPCount = 0;
+    int ipCount = 0;
+    for (Instance ip : ips) {
+      if (!ip.isHealthy()) {
+        invalidIPCount++;
+      }
+
+      ipCount++;
     }
 
-    public String toJSON() {
-        return JSON.toJSONString(this);
+    serviceObject.put("ipCount", ipCount);
+    serviceObject.put("invalidIPCount", invalidIPCount);
+
+    serviceObject.put("owners", service.getOwners());
+    serviceObject.put("token", service.getToken());
+
+    serviceObject.put("protectThreshold", service.getProtectThreshold());
+
+    List<Object> clustersList = new ArrayList<Object>();
+
+    for (Map.Entry<String, Cluster> entry : service.getClusterMap().entrySet()) {
+      Cluster cluster = entry.getValue();
+
+      Map<Object, Object> clusters = new HashMap<Object, Object>(10);
+      clusters.put("name", cluster.getName());
+      clusters.put("healthChecker", cluster.getHealthChecker());
+      clusters.put("defCkport", cluster.getDefCkport());
+      clusters.put("defIPPort", cluster.getDefIPPort());
+      clusters.put("useIPPort4Check", cluster.isUseIPPort4Check());
+      clusters.put("sitegroup", cluster.getSitegroup());
+
+      clustersList.add(clusters);
     }
 
-    @JSONField(serialize = false)
-    public String getServiceString() {
-        Map<Object, Object> serviceObject = new HashMap<Object, Object>(10);
-        Service service = this;
+    serviceObject.put("clusters", clustersList);
 
-        serviceObject.put("name", service.getName());
+    return JSON.toJSONString(serviceObject);
+  }
 
-        List<Instance> ips = service.allIPs();
-        int invalidIPCount = 0;
-        int ipCount = 0;
-        for (Instance ip : ips) {
-            if (!ip.isHealthy()) {
-                invalidIPCount++;
-            }
+  public String getToken() {
+    return token;
+  }
 
-            ipCount++;
-        }
+  public void setToken(String token) {
+    this.token = token;
+  }
 
-        serviceObject.put("ipCount", ipCount);
-        serviceObject.put("invalidIPCount", invalidIPCount);
+  public List<String> getOwners() {
+    return owners;
+  }
 
-        serviceObject.put("owners", service.getOwners());
-        serviceObject.put("token", service.getToken());
+  public void setOwners(List<String> owners) {
+    this.owners = owners;
+  }
 
-        serviceObject.put("protectThreshold", service.getProtectThreshold());
+  public Map<String, Cluster> getClusterMap() {
+    return clusterMap;
+  }
 
-        List<Object> clustersList = new ArrayList<Object>();
+  public void setClusterMap(Map<String, Cluster> clusterMap) {
+    this.clusterMap = clusterMap;
+  }
 
-        for (Map.Entry<String, Cluster> entry : service.getClusterMap().entrySet()) {
-            Cluster cluster = entry.getValue();
+  public String getNamespaceId() {
+    return namespaceId;
+  }
 
-            Map<Object, Object> clusters = new HashMap<Object, Object>(10);
-            clusters.put("name", cluster.getName());
-            clusters.put("healthChecker", cluster.getHealthChecker());
-            clusters.put("defCkport", cluster.getDefCkport());
-            clusters.put("defIPPort", cluster.getDefIPPort());
-            clusters.put("useIPPort4Check", cluster.isUseIPPort4Check());
-            clusters.put("sitegroup", cluster.getSitegroup());
+  public void setNamespaceId(String namespaceId) {
+    this.namespaceId = namespaceId;
+  }
 
-            clustersList.add(clusters);
-        }
+  public void update(Service vDom) {
 
-        serviceObject.put("clusters", clustersList);
-
-        return JSON.toJSONString(serviceObject);
+    if (!StringUtils.equals(token, vDom.getToken())) {
+      Loggers.SRV_LOG.info("[SERVICE-UPDATE] service: {}, token: {} -> {}", getName(), token, vDom.getToken());
+      token = vDom.getToken();
     }
 
-    public String getToken() {
-        return token;
+    if (!ListUtils.isEqualList(owners, vDom.getOwners())) {
+      Loggers.SRV_LOG.info("[SERVICE-UPDATE] service: {}, owners: {} -> {}", getName(), owners, vDom.getOwners());
+      owners = vDom.getOwners();
     }
 
-    public void setToken(String token) {
-        this.token = token;
+    if (getProtectThreshold() != vDom.getProtectThreshold()) {
+      Loggers.SRV_LOG.info("[SERVICE-UPDATE] service: {}, protectThreshold: {} -> {}", getName(), getProtectThreshold(),
+          vDom.getProtectThreshold());
+      setProtectThreshold(vDom.getProtectThreshold());
     }
 
-    public List<String> getOwners() {
-        return owners;
+    if (resetWeight != vDom.getResetWeight().booleanValue()) {
+      Loggers.SRV_LOG.info("[SERVICE-UPDATE] service: {}, resetWeight: {} -> {}", getName(), resetWeight,
+          vDom.getResetWeight());
+      resetWeight = vDom.getResetWeight();
     }
 
-    public void setOwners(List<String> owners) {
-        this.owners = owners;
+    if (enabled != vDom.getEnabled().booleanValue()) {
+      Loggers.SRV_LOG.info("[SERVICE-UPDATE] service: {}, enabled: {} -> {}", getName(), enabled, vDom.getEnabled());
+      enabled = vDom.getEnabled();
     }
 
-    public Map<String, Cluster> getClusterMap() {
-        return clusterMap;
+    selector = vDom.getSelector();
+
+    setMetadata(vDom.getMetadata());
+
+    updateOrAddCluster(vDom.getClusterMap().values());
+    remvDeadClusters(this, vDom);
+    recalculateChecksum();
+  }
+
+  @Override
+  public String getChecksum() {
+    if (StringUtils.isEmpty(checksum)) {
+      recalculateChecksum();
     }
 
-    public void setClusterMap(Map<String, Cluster> clusterMap) {
-        this.clusterMap = clusterMap;
+    return checksum;
+  }
+
+  /**
+   * 根据 Service 实例当前的状态信息以及对应的服务实例信息重新计算服务的校验和（可能有变更，校验和就会有变化）
+   */
+  public synchronized void recalculateChecksum() {
+    List<Instance> ips = allIPs();
+
+    StringBuilder ipsString = new StringBuilder();
+    ipsString.append(getServiceString());
+
+    if (Loggers.SRV_LOG.isDebugEnabled()) {
+      Loggers.SRV_LOG.debug("service to json: " + getServiceString());
     }
 
-    public String getNamespaceId() {
-        return namespaceId;
+    if (CollectionUtils.isNotEmpty(ips)) {
+      Collections.sort(ips);
     }
 
-    public void setNamespaceId(String namespaceId) {
-        this.namespaceId = namespaceId;
+    for (Instance ip : ips) {
+      String string = ip.getIp() + ":" + ip.getPort() + "_" + ip.getWeight() + "_" + ip.isHealthy() + "_"
+          + ip.getClusterName();
+      ipsString.append(string);
+      ipsString.append(",");
     }
 
-    public void update(Service vDom) {
+    try {
+      String result;
+      try {
+        MessageDigest md5 = MessageDigest.getInstance("MD5");
+        result = new BigInteger(1, md5.digest((ipsString.toString()).getBytes(Charset.forName("UTF-8")))).toString(16);
+      } catch (Exception e) {
+        Loggers.SRV_LOG.error("[NACOS-DOM] error while calculating checksum(md5)", e);
+        result = RandomStringUtils.randomAscii(32);
+      }
 
-        if (!StringUtils.equals(token, vDom.getToken())) {
-            Loggers.SRV_LOG.info("[SERVICE-UPDATE] service: {}, token: {} -> {}", getName(), token, vDom.getToken());
-            token = vDom.getToken();
-        }
-
-        if (!ListUtils.isEqualList(owners, vDom.getOwners())) {
-            Loggers.SRV_LOG.info("[SERVICE-UPDATE] service: {}, owners: {} -> {}", getName(), owners, vDom.getOwners());
-            owners = vDom.getOwners();
-        }
-
-        if (getProtectThreshold() != vDom.getProtectThreshold()) {
-            Loggers.SRV_LOG.info("[SERVICE-UPDATE] service: {}, protectThreshold: {} -> {}", getName(), getProtectThreshold(), vDom.getProtectThreshold());
-            setProtectThreshold(vDom.getProtectThreshold());
-        }
-
-        if (resetWeight != vDom.getResetWeight().booleanValue()) {
-            Loggers.SRV_LOG.info("[SERVICE-UPDATE] service: {}, resetWeight: {} -> {}", getName(), resetWeight, vDom.getResetWeight());
-            resetWeight = vDom.getResetWeight();
-        }
-
-        if (enabled != vDom.getEnabled().booleanValue()) {
-            Loggers.SRV_LOG.info("[SERVICE-UPDATE] service: {}, enabled: {} -> {}", getName(), enabled, vDom.getEnabled());
-            enabled = vDom.getEnabled();
-        }
-
-        selector = vDom.getSelector();
-
-        setMetadata(vDom.getMetadata());
-
-        updateOrAddCluster(vDom.getClusterMap().values());
-        remvDeadClusters(this, vDom);
-        recalculateChecksum();
+      checksum = result;
+    } catch (Exception e) {
+      Loggers.SRV_LOG.error("[NACOS-DOM] error while calculating checksum(md5)", e);
+      checksum = RandomStringUtils.randomAscii(32);
     }
+  }
 
-    @Override
-    public String getChecksum() {
-        if (StringUtils.isEmpty(checksum)) {
-            recalculateChecksum();
-        }
-
-        return checksum;
-    }
-
-    public synchronized void recalculateChecksum() {
-        List<Instance> ips = allIPs();
-
-        StringBuilder ipsString = new StringBuilder();
-        ipsString.append(getServiceString());
-
-        if (Loggers.SRV_LOG.isDebugEnabled()) {
-            Loggers.SRV_LOG.debug("service to json: " + getServiceString());
-        }
-
-        if (CollectionUtils.isNotEmpty(ips)) {
-            Collections.sort(ips);
-        }
-
-        for (Instance ip : ips) {
-            String string = ip.getIp() + ":" + ip.getPort() + "_" + ip.getWeight() + "_"
-                + ip.isHealthy() + "_" + ip.getClusterName();
-            ipsString.append(string);
-            ipsString.append(",");
-        }
-
-        try {
-            String result;
-            try {
-                MessageDigest md5 = MessageDigest.getInstance("MD5");
-                result = new BigInteger(1, md5.digest((ipsString.toString()).getBytes(Charset.forName("UTF-8")))).toString(16);
-            } catch (Exception e) {
-                Loggers.SRV_LOG.error("[NACOS-DOM] error while calculating checksum(md5)", e);
-                result = RandomStringUtils.randomAscii(32);
-            }
-
-            checksum = result;
-        } catch (Exception e) {
-            Loggers.SRV_LOG.error("[NACOS-DOM] error while calculating checksum(md5)", e);
-            checksum = RandomStringUtils.randomAscii(32);
-        }
-    }
-
-    private void updateOrAddCluster(Collection<Cluster> clusters) {
-        for (Cluster cluster : clusters) {
-            Cluster oldCluster = clusterMap.get(cluster.getName());
-            if (oldCluster != null) {
-                oldCluster.setService(this);
-                oldCluster.update(cluster);
-            } else {
-                cluster.init();
-                cluster.setService(this);
-                clusterMap.put(cluster.getName(), cluster);
-            }
-        }
-    }
-
-    private void remvDeadClusters(Service oldDom, Service newDom) {
-        Collection<Cluster> oldClusters = oldDom.getClusterMap().values();
-        Collection<Cluster> newClusters = newDom.getClusterMap().values();
-        List<Cluster> deadClusters = (List<Cluster>) CollectionUtils.subtract(oldClusters, newClusters);
-        for (Cluster cluster : deadClusters) {
-            oldDom.getClusterMap().remove(cluster.getName());
-
-            cluster.destroy();
-        }
-    }
-
-    public void addCluster(Cluster cluster) {
+  private void updateOrAddCluster(Collection<Cluster> clusters) {
+    for (Cluster cluster : clusters) {
+      Cluster oldCluster = clusterMap.get(cluster.getName());
+      if (oldCluster != null) {
+        oldCluster.setService(this);
+        oldCluster.update(cluster);
+      } else {
+        cluster.init();
+        cluster.setService(this);
         clusterMap.put(cluster.getName(), cluster);
+      }
     }
+  }
 
-    public void validate() {
-        if (!getName().matches(SERVICE_NAME_SYNTAX)) {
-            throw new IllegalArgumentException("dom name can only have these characters: 0-9a-zA-Z-._:, current: " + getName());
-        }
-        for (Cluster cluster : clusterMap.values()) {
-            cluster.validate();
-        }
+  private void remvDeadClusters(Service oldDom, Service newDom) {
+    Collection<Cluster> oldClusters = oldDom.getClusterMap().values();
+    Collection<Cluster> newClusters = newDom.getClusterMap().values();
+    List<Cluster> deadClusters = (List<Cluster>) CollectionUtils.subtract(oldClusters, newClusters);
+    for (Cluster cluster : deadClusters) {
+      oldDom.getClusterMap().remove(cluster.getName());
+
+      cluster.destroy();
     }
+  }
+
+  public void addCluster(Cluster cluster) {
+    clusterMap.put(cluster.getName(), cluster);
+  }
+
+  public void validate() {
+    if (!getName().matches(SERVICE_NAME_SYNTAX)) {
+      throw new IllegalArgumentException(
+          "dom name can only have these characters: 0-9a-zA-Z-._:, current: " + getName());
+    }
+    for (Cluster cluster : clusterMap.values()) {
+      cluster.validate();
+    }
+  }
 }

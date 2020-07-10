@@ -26,6 +26,7 @@ import org.springframework.stereotype.Component;
 import javax.servlet.ServletContext;
 
 /**
+ * RunningConfig 是一个应用监听器，仅对 WebServerInitializedEvent 事件感兴趣
  * @author nkorange
  */
 @Component("runningConfig")
@@ -38,6 +39,11 @@ public class RunningConfig implements ApplicationListener<WebServerInitializedEv
     @Autowired
     private ServletContext servletContext;
 
+    /**
+     * 负责处理感兴趣的应用事件。
+     * <p>
+     * 此处负责获取 web server 的端口号以及上下文路径。
+     */
     @Override
     public void onApplicationEvent(WebServerInitializedEvent event) {
 

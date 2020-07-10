@@ -25,7 +25,14 @@ import com.alibaba.nacos.naming.consistency.ConsistencyService;
  * Once the writing operation returned client a success, the data within the operation is guaranteed to be
  * successfully written to the cluster. And the data should be consistent between servers after some time
  * without any outside interfere.
- *
+ * <p>
+ * 一个支持 CP 模式的一致性服务。
+ * <p>
+ * CP 定义如下：
+ * <p>
+ * 一旦写操作响应给客户端成功，就意味着数据已经被成功写入到了集群。
+ * 无需外部干预，一段时间后数据在各个服务实例之间达成一致。
+ * 
  * @author nkorange
  * @since 1.0.0
  */

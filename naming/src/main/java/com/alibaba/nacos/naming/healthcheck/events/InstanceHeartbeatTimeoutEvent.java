@@ -19,23 +19,25 @@ import com.alibaba.nacos.naming.core.Instance;
 import org.springframework.context.ApplicationEvent;
 
 /**
+ * 服务实例心跳超时事件
+ * 
  * @author pbting
  * @date 2019-05-28 8:29 PM
  */
 public class InstanceHeartbeatTimeoutEvent extends ApplicationEvent {
 
-    private Instance instance;
+  private Instance instance;
 
-    public InstanceHeartbeatTimeoutEvent(Object source, Instance instance) {
-        super(source);
-        this.instance = instance;
-    }
+  public InstanceHeartbeatTimeoutEvent(Object source, Instance instance) {
+    super(source);
+    this.instance = instance;
+  }
 
-    public void setInstance(Instance instance) {
-        this.instance = instance;
-    }
+  public void setInstance(Instance instance) {
+    this.instance = instance;
+  }
 
-    public Instance getInstance() {
-        return instance;
-    }
+  public Instance getInstance() {
+    return instance;
+  }
 }

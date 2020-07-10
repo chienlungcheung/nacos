@@ -16,21 +16,25 @@
 package com.alibaba.nacos.naming.healthcheck;
 
 /**
+ * 负责运行健康检查任务。
+ * <p>
+ * 目前共有四类健康检查，基于 Http、TCP、MySql 或者空。
+ * 
  * @author nkorange
  */
 public interface HealthCheckProcessor {
 
-    /**
-     * Run check task for service
-     *
-     * @param task check task
-     */
-    void process(HealthCheckTask task);
+  /**
+   * Run check task for service
+   *
+   * @param task check task
+   */
+  void process(HealthCheckTask task);
 
-    /**
-     * Get check task type, refer to enum HealthCheckType
-     *
-     * @return check type
-     */
-    String getType();
+  /**
+   * Get check task type, refer to enum HealthCheckType
+   *
+   * @return check type
+   */
+  String getType();
 }

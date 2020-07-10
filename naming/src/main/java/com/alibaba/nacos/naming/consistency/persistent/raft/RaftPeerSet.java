@@ -44,12 +44,18 @@ import java.util.concurrent.atomic.AtomicLong;
 import static com.alibaba.nacos.core.utils.SystemUtils.STANDALONE_MODE;
 
 /**
+ * RaftPeerSet 可以看作是对 raft 集群的抽象，明确了当前 leader，当前集群节点集合，当前集群是否就绪等等。
+ * <p>
+ * 该类提供了若干管理集群的方法，如指定 leader、计票、刷新集群节点等等。
  * @author nacos
  */
 @Component
 @DependsOn("serverListManager")
 public class RaftPeerSet implements ServerChangeListener, ApplicationContextAware {
 
+    /**
+     * RaftPeerSet 会把自己作为监听器注册到 serverListManager，后者会周期性检查当前 raft 集群节点变化情况（上线新的或者下线了旧的）并通知前者。
+     */
     @Autowired
     private ServerListManager serverListManager;
 

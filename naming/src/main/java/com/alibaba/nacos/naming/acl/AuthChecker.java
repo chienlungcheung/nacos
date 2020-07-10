@@ -32,6 +32,7 @@ import java.security.AccessControlException;
 import java.util.Map;
 
 /**
+ * AuthChecker 负责处理认证
  * @author nkorange
  */
 @Component

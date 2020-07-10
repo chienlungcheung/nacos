@@ -33,78 +33,79 @@ import java.util.Map;
 
 /**
  * Package of instance list
- *
+ * <p>
+ * 服务实例列表的封装
+ * 
  * @author nkorange
  * @since 1.0.0
  */
 public class Instances implements Record {
 
-    private String cachedChecksum;
+  private String cachedChecksum;
 
-    private long lastCalculateTime = 0L;
+  private long lastCalculateTime = 0L;
 
-    private List<Instance> instanceList = new ArrayList<>();
+  private List<Instance> instanceList = new ArrayList<>();
 
-    public List<Instance> getInstanceList() {
-        return instanceList;
+  public List<Instance> getInstanceList() {
+    return instanceList;
+  }
+
+  public void setInstanceList(List<Instance> instanceList) {
+    this.instanceList = instanceList;
+  }
+
+  @Override
+  public String toString() {
+    return JSON.toJSONString(this);
+  }
+
+  @Override
+  @JSONField(serialize = false)
+  public String getChecksum() {
+    recalculateChecksum();
+    return cachedChecksum;
+  }
+
+  public String getCachedChecksum() {
+    return cachedChecksum;
+  }
+
+  private void recalculateChecksum() {
+    StringBuilder sb = new StringBuilder();
+    Collections.sort(instanceList);
+    for (Instance ip : instanceList) {
+      String string = ip.getIp() + ":" + ip.getPort() + "_" + ip.getWeight() + "_" + ip.isHealthy() + "_"
+          + ip.isEnabled() + "_" + ip.getClusterName() + "_" + convertMap2String(ip.getMetadata());
+      sb.append(string);
+      sb.append(",");
+    }
+    MessageDigest md5;
+    try {
+      md5 = MessageDigest.getInstance("MD5");
+      cachedChecksum = new BigInteger(1, md5.digest((sb.toString()).getBytes(Charset.forName("UTF-8")))).toString(16);
+    } catch (NoSuchAlgorithmException e) {
+      Loggers.SRV_LOG.error("error while calculating checksum(md5) for instances", e);
+      cachedChecksum = RandomStringUtils.randomAscii(32);
+    }
+    lastCalculateTime = System.currentTimeMillis();
+  }
+
+  public String convertMap2String(Map<String, String> map) {
+
+    if (map == null || map.isEmpty()) {
+      return StringUtils.EMPTY;
     }
 
-    public void setInstanceList(List<Instance> instanceList) {
-        this.instanceList = instanceList;
+    StringBuilder sb = new StringBuilder();
+    List<String> keys = new ArrayList<>(map.keySet());
+    Collections.sort(keys);
+    for (String key : keys) {
+      sb.append(key);
+      sb.append(":");
+      sb.append(map.get(key));
+      sb.append(",");
     }
-
-    @Override
-    public String toString() {
-        return JSON.toJSONString(this);
-    }
-
-    @Override
-    @JSONField(serialize = false)
-    public String getChecksum() {
-        recalculateChecksum();
-        return cachedChecksum;
-    }
-
-    public String getCachedChecksum() {
-        return cachedChecksum;
-    }
-
-    private void recalculateChecksum() {
-        StringBuilder sb = new StringBuilder();
-        Collections.sort(instanceList);
-        for (Instance ip : instanceList) {
-            String string = ip.getIp() + ":" + ip.getPort() + "_" + ip.getWeight() + "_"
-                + ip.isHealthy() + "_" + ip.isEnabled() + "_" + ip.getClusterName() + "_" + convertMap2String(ip.getMetadata());
-            sb.append(string);
-            sb.append(",");
-        }
-        MessageDigest md5;
-        try {
-            md5 = MessageDigest.getInstance("MD5");
-            cachedChecksum =
-                new BigInteger(1, md5.digest((sb.toString()).getBytes(Charset.forName("UTF-8")))).toString(16);
-        } catch (NoSuchAlgorithmException e) {
-            Loggers.SRV_LOG.error("error while calculating checksum(md5) for instances", e);
-            cachedChecksum = RandomStringUtils.randomAscii(32);
-        }
-        lastCalculateTime = System.currentTimeMillis();
-    }
-
-    public String convertMap2String(Map<String, String> map) {
-
-        if (map == null || map.isEmpty()) {
-            return StringUtils.EMPTY;
-        }
-
-        StringBuilder sb = new StringBuilder();
-        List<String> keys = new ArrayList<>(map.keySet());
-        Collections.sort(keys);
-        for (String key : keys) {
-            sb.append(key);
-            sb.append(":");
-            sb.append(map.get(key));
-            sb.append(",");
-        }
-        return sb.toString();
-    }
+    return sb.toString();
+  }
 }

@@ -21,130 +21,132 @@ import java.util.Map;
 
 /**
  * Metrics info of server
- *
+ * <p>
+ * 服务器的指标信息
+ * 
  * @author nacos
  */
 public class RsInfo {
-    private double load;
-    private double cpu;
-    private double rt;
-    private double qps;
-    private double mem;
-    private int port;
-    private String ip;
-    private String serviceName;
-    private String ak;
-    private String cluster;
-    private double weight;
-    private boolean ephemeral = true;
-    private Map<String, String> metadata;
+  private double load;
+  private double cpu;
+  private double rt;
+  private double qps;
+  private double mem;
+  private int port;
+  private String ip;
+  private String serviceName;
+  private String ak;
+  private String cluster;
+  private double weight;
+  private boolean ephemeral = true;
+  private Map<String, String> metadata;
 
-    public String getServiceName() {
-        return serviceName;
-    }
+  public String getServiceName() {
+    return serviceName;
+  }
 
-    public void setServiceName(String serviceName) {
-        this.serviceName = serviceName;
-    }
+  public void setServiceName(String serviceName) {
+    this.serviceName = serviceName;
+  }
 
-    public String getAk() {
-        return ak;
-    }
+  public String getAk() {
+    return ak;
+  }
 
-    public void setAk(String ak) {
-        this.ak = ak;
-    }
+  public void setAk(String ak) {
+    this.ak = ak;
+  }
 
-    public String getCluster() {
-        return cluster;
-    }
+  public String getCluster() {
+    return cluster;
+  }
 
-    public void setCluster(String cluster) {
-        this.cluster = cluster;
-    }
+  public void setCluster(String cluster) {
+    this.cluster = cluster;
+  }
 
-    public String getIp() {
-        return ip;
-    }
+  public String getIp() {
+    return ip;
+  }
 
-    public void setIp(String ip) {
-        this.ip = ip;
-    }
+  public void setIp(String ip) {
+    this.ip = ip;
+  }
 
-    public int getPort() {
-        return port;
-    }
+  public int getPort() {
+    return port;
+  }
 
-    public void setPort(int port) {
-        this.port = port;
-    }
+  public void setPort(int port) {
+    this.port = port;
+  }
 
-    public double getLoad() {
-        return load;
-    }
+  public double getLoad() {
+    return load;
+  }
 
-    public void setLoad(double load) {
-        this.load = load;
-    }
+  public void setLoad(double load) {
+    this.load = load;
+  }
 
-    public double getCpu() {
-        return cpu;
-    }
+  public double getCpu() {
+    return cpu;
+  }
 
-    public void setCpu(double cpu) {
-        this.cpu = cpu;
-    }
+  public void setCpu(double cpu) {
+    this.cpu = cpu;
+  }
 
-    public double getRt() {
-        return rt;
-    }
+  public double getRt() {
+    return rt;
+  }
 
-    public void setRt(double rt) {
-        this.rt = rt;
-    }
+  public void setRt(double rt) {
+    this.rt = rt;
+  }
 
-    public double getQps() {
-        return qps;
-    }
+  public double getQps() {
+    return qps;
+  }
 
-    public void setQps(double qps) {
-        this.qps = qps;
-    }
+  public void setQps(double qps) {
+    this.qps = qps;
+  }
 
-    public double getMem() {
-        return mem;
-    }
+  public double getMem() {
+    return mem;
+  }
 
-    public void setMem(double mem) {
-        this.mem = mem;
-    }
+  public void setMem(double mem) {
+    this.mem = mem;
+  }
 
-    public double getWeight() {
-        return weight;
-    }
+  public double getWeight() {
+    return weight;
+  }
 
-    public void setWeight(double weight) {
-        this.weight = weight;
-    }
+  public void setWeight(double weight) {
+    this.weight = weight;
+  }
 
-    public boolean isEphemeral() {
-        return ephemeral;
-    }
+  public boolean isEphemeral() {
+    return ephemeral;
+  }
 
-    public void setEphemeral(boolean ephemeral) {
-        this.ephemeral = ephemeral;
-    }
+  public void setEphemeral(boolean ephemeral) {
+    this.ephemeral = ephemeral;
+  }
 
-    public Map<String, String> getMetadata() {
-        return metadata;
-    }
+  public Map<String, String> getMetadata() {
+    return metadata;
+  }
 
-    public void setMetadata(Map<String, String> metadata) {
-        this.metadata = metadata;
-    }
+  public void setMetadata(Map<String, String> metadata) {
+    this.metadata = metadata;
+  }
 
-    @Override
-    public String toString() {
-        return JSON.toJSONString(this);
-    }
+  @Override
+  public String toString() {
+    return JSON.toJSONString(this);
+  }
 }

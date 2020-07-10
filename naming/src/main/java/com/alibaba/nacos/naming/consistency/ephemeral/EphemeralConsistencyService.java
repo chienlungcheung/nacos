@@ -27,7 +27,14 @@ import com.alibaba.nacos.naming.consistency.ConsistencyService;
  * What is required is that writing should always be successful even if network partition
  * happens. And when the network recovers, data of each partition is merged into one set,
  * so the cluster resumes to a consistent status.
- *
+ * <p>
+ * 临时数据的一致性类型
+ * <p>
+ * 该一致性类型不要求把数据保存在磁盘或者数据库中，因为临时数据总是与服务实例保持一个会话，
+ * 只要会话活着数据就不会丢失。
+ * <p>
+ * 唯一的要求就是，写操作应该总是能够成功，即使发生网络分区。当网络恢复后，每个分区的数据被合并，从而达成最终一致性。
+ * 简单讲，就是针对临时数据要确保 AP。
  * @author nkorange
  * @since 1.0.0
  */

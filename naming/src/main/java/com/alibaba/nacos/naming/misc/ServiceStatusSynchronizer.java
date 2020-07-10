@@ -26,76 +26,84 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
+ * 在服务实例之间同步服务的信息。
+ * 
  * @author nacos
  */
 public class ServiceStatusSynchronizer implements Synchronizer {
-    @Override
-    public void send(final String serverIP, Message msg) {
-        if(serverIP == null) {
-            return;
-        }
-
-        Map<String,String> params = new HashMap<String, String>(10);
-
-        params.put("statuses", msg.getData());
-        params.put("clientIP", NetUtils.localServer());
-
-
-        String url = "http://" + serverIP + ":" + RunningConfig.getServerPort() + RunningConfig.getContextPath() +
-                UtilsAndCommons.NACOS_NAMING_CONTEXT + "/service/status";
-
-        if (serverIP.contains(UtilsAndCommons.IP_PORT_SPLITER)) {
-            url = "http://" + serverIP + RunningConfig.getContextPath() +
-                    UtilsAndCommons.NACOS_NAMING_CONTEXT + "/service/status";
-        }
-
-        try {
-            HttpClient.asyncHttpPostLarge(url, null, JSON.toJSONString(params), new AsyncCompletionHandler() {
-                @Override
-                public Integer onCompleted(Response response) throws Exception {
-                    if (response.getStatusCode() != HttpURLConnection.HTTP_OK) {
-                        Loggers.SRV_LOG.warn("[STATUS-SYNCHRONIZE] failed to request serviceStatus, remote server: {}", serverIP);
-
-                        return 1;
-                    }
-                    return 0;
-                }
-            });
-        } catch (Exception e) {
-            Loggers.SRV_LOG.warn("[STATUS-SYNCHRONIZE] failed to request serviceStatus, remote server: " + serverIP, e);
-        }
-
+  /**
+   * 向地址为 serverIP 的服务实例的 service/status 接口发送 msg。
+   */
+  @Override
+  public void send(final String serverIP, Message msg) {
+    if (serverIP == null) {
+      return;
     }
 
-    @Override
-    public Message get(String serverIP, String key) {
-        if(serverIP == null) {
-            return null;
-        }
+    Map<String, String> params = new HashMap<String, String>(10);
 
-        Map<String,String> params = new HashMap<>(10);
+    params.put("statuses", msg.getData());
+    params.put("clientIP", NetUtils.localServer());
 
-        params.put("key", key);
+    String url = "http://" + serverIP + ":" + RunningConfig.getServerPort() + RunningConfig.getContextPath()
+        + UtilsAndCommons.NACOS_NAMING_CONTEXT + "/service/status";
 
-        String result;
-        try {
-            if (Loggers.SRV_LOG.isDebugEnabled()) {
-                Loggers.SRV_LOG.debug("[STATUS-SYNCHRONIZE] sync service status from: {}, service: {}", serverIP, key);
-            }
-            result = NamingProxy.reqAPI(RunningConfig.getContextPath()
-                + UtilsAndCommons.NACOS_NAMING_CONTEXT + "/instance/" + "statuses", params, serverIP);
-        } catch (Exception e) {
-            Loggers.SRV_LOG.warn("[STATUS-SYNCHRONIZE] Failed to get service status from " + serverIP, e);
-            return null;
-        }
-
-        if(result == null || result.equals(StringUtils.EMPTY)) {
-            return null;
-        }
-
-        Message msg = new Message();
-        msg.setData(result);
-
-        return msg;
+    if (serverIP.contains(UtilsAndCommons.IP_PORT_SPLITER)) {
+      url = "http://" + serverIP + RunningConfig.getContextPath() + UtilsAndCommons.NACOS_NAMING_CONTEXT
+          + "/service/status";
     }
+
+    try {
+      HttpClient.asyncHttpPostLarge(url, null, JSON.toJSONString(params), new AsyncCompletionHandler() {
+        @Override
+        public Integer onCompleted(Response response) throws Exception {
+          if (response.getStatusCode() != HttpURLConnection.HTTP_OK) {
+            Loggers.SRV_LOG.warn("[STATUS-SYNCHRONIZE] failed to request serviceStatus, remote server: {}", serverIP);
+
+            return 1;
+          }
+          return 0;
+        }
+      });
+    } catch (Exception e) {
+      Loggers.SRV_LOG.warn("[STATUS-SYNCHRONIZE] failed to request serviceStatus, remote server: " + serverIP, e);
+    }
+
+  }
+
+  /**
+   * 从地址为 serverIP 的服务实例的 instance/statuses 接口，获取名称为 key 的服务的信息。
+   */
+  @Override
+  public Message get(String serverIP, String key) {
+    if (serverIP == null) {
+      return null;
+    }
+
+    Map<String, String> params = new HashMap<>(10);
+
+    params.put("key", key);
+
+    String result;
+    try {
+      if (Loggers.SRV_LOG.isDebugEnabled()) {
+        Loggers.SRV_LOG.debug("[STATUS-SYNCHRONIZE] sync service status from: {}, service: {}", serverIP, key);
+      }
+      result = NamingProxy.reqAPI(
+          RunningConfig.getContextPath() + UtilsAndCommons.NACOS_NAMING_CONTEXT + "/instance/" + "statuses", params,
+          serverIP);
+    } catch (Exception e) {
+      Loggers.SRV_LOG.warn("[STATUS-SYNCHRONIZE] Failed to get service status from " + serverIP, e);
+      return null;
+    }
+
+    if (result == null || result.equals(StringUtils.EMPTY)) {
+      return null;
+    }
+
+    Message msg = new Message();
+    msg.setData(result);
+
+    return msg;
+  }
 }

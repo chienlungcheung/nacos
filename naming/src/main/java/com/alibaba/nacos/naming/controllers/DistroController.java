@@ -45,7 +45,9 @@ import java.util.Map;
 
 /**
  * Restful methods for Partition protocol.
- *
+ * <p>
+ * 针对 Partition 一致性算法的 http 接口.
+ * 
  * @author nkorange
  * @since 1.0.0
  */
@@ -53,74 +55,103 @@ import java.util.Map;
 @RequestMapping(UtilsAndCommons.NACOS_NAMING_CONTEXT + "/distro")
 public class DistroController {
 
-    @Autowired
-    private Serializer serializer;
+  @Autowired
+  private Serializer serializer;
 
-    @Autowired
-    private DistroConsistencyServiceImpl consistencyService;
+  @Autowired
+  private DistroConsistencyServiceImpl consistencyService;
 
-    @Autowired
-    private DataStore dataStore;
+  @Autowired
+  private DataStore dataStore;
 
-    @Autowired
-    private ServiceManager serviceManager;
+  @Autowired
+  private ServiceManager serviceManager;
 
-    @Autowired
-    private SwitchDomain switchDomain;
+  @Autowired
+  private SwitchDomain switchDomain;
 
-    @RequestMapping(value = "/datum", method = RequestMethod.PUT)
-    public String onSyncDatum(HttpServletRequest request, HttpServletResponse response) throws Exception {
+  /**
+   * 接收处理其它 nacos 节点发来的服务发现相关的信息([service-key: Instances]), 这些信息将会用来更新本地内存数据.
+   * 
+   * @param request
+   * @param response
+   * @return
+   * @throws Exception
+   */
+  @RequestMapping(value = "/datum", method = RequestMethod.PUT)
+  public String onSyncDatum(HttpServletRequest request, HttpServletResponse response) throws Exception {
 
-        String entity = IOUtils.toString(request.getInputStream(), "UTF-8");
+    String entity = IOUtils.toString(request.getInputStream(), "UTF-8");
 
-        if (StringUtils.isBlank(entity)) {
-            Loggers.DISTRO.error("[onSync] receive empty entity!");
-            throw new NacosException(NacosException.INVALID_PARAM, "receive empty entity!");
+    if (StringUtils.isBlank(entity)) {
+      Loggers.DISTRO.error("[onSync] receive empty entity!");
+      throw new NacosException(NacosException.INVALID_PARAM, "receive empty entity!");
+    }
+
+    Map<String, Datum<Instances>> dataMap = serializer.deserializeMap(entity.getBytes(), Instances.class);
+
+    for (Map.Entry<String, Datum<Instances>> entry : dataMap.entrySet()) {
+      // 只处理临时的实例数据(这是 Partiton 算法负责的)
+      if (KeyBuilder.matchEphemeralInstanceListKey(entry.getKey())) {
+        String namespaceId = KeyBuilder.getNamespace(entry.getKey());
+        String serviceName = KeyBuilder.getServiceName(entry.getKey());
+        if (!serviceManager.containService(namespaceId, serviceName) && switchDomain.isDefaultInstanceEphemeral()) {
+          serviceManager.createEmptyService(namespaceId, serviceName, true);
         }
-
-        Map<String, Datum<Instances>> dataMap =
-            serializer.deserializeMap(entity.getBytes(), Instances.class);
-
-        for (Map.Entry<String, Datum<Instances>> entry : dataMap.entrySet()) {
-            if (KeyBuilder.matchEphemeralInstanceListKey(entry.getKey())) {
-                String namespaceId = KeyBuilder.getNamespace(entry.getKey());
-                String serviceName = KeyBuilder.getServiceName(entry.getKey());
-                if (!serviceManager.containService(namespaceId, serviceName)
-                    && switchDomain.isDefaultInstanceEphemeral()) {
-                    serviceManager.createEmptyService(namespaceId, serviceName, true);
-                }
-                consistencyService.onPut(entry.getKey(), entry.getValue().value);
-            }
-        }
-        return "ok";
+        // 将服务信息放到本地内存存储
+        consistencyService.onPut(entry.getKey(), entry.getValue().value);
+      }
     }
+    return "ok";
+  }
 
-    @RequestMapping(value = "/checksum", method = RequestMethod.PUT)
-    public String syncChecksum(HttpServletRequest request, HttpServletResponse response) throws Exception {
-        String source = WebUtils.required(request, "source");
-        String entity = IOUtils.toString(request.getInputStream(), "UTF-8");
-        Map<String, String> dataMap =
-            serializer.deserialize(entity.getBytes(), new TypeReference<Map<String, String>>() {
-        });
-        consistencyService.onReceiveChecksums(dataMap, source);
-        return "ok";
+  /**
+   * 接收其它 nacos 节点发来的服务校验和信息, 与本地比较后进行更新或者删除.
+   * 
+   * @param request
+   * @param response
+   * @return
+   * @throws Exception
+   */
+  @RequestMapping(value = "/checksum", method = RequestMethod.PUT)
+  public String syncChecksum(HttpServletRequest request, HttpServletResponse response) throws Exception {
+    String source = WebUtils.required(request, "source");
+    String entity = IOUtils.toString(request.getInputStream(), "UTF-8");
+    Map<String, String> dataMap = serializer.deserialize(entity.getBytes(), new TypeReference<Map<String, String>>() {
+    });
+    consistencyService.onReceiveChecksums(dataMap, source);
+    return "ok";
+  }
+
+  /**
+   * 响应其它 nacos 节点的查询请求, 根据对方传来的服务 key, 从本地内存存储查询对应的实例列表信息.
+   * 
+   * @param request
+   * @param response
+   * @throws Exception
+   */
+  @RequestMapping(value = "/datum", method = RequestMethod.GET)
+  public void get(HttpServletRequest request, HttpServletResponse response) throws Exception {
+
+    String entity = IOUtils.toString(request.getInputStream(), "UTF-8");
+    String keys = JSON.parseObject(entity).getString("keys");
+    String keySplitter = ",";
+    Map<String, Datum> datumMap = new HashMap<>(64);
+    for (String key : keys.split(keySplitter)) {
+      datumMap.put(key, consistencyService.get(key));
     }
+    response.getWriter().write(new String(serializer.serialize(datumMap), StandardCharsets.UTF_8));
+  }
 
-    @RequestMapping(value = "/datum", method = RequestMethod.GET)
-    public void get(HttpServletRequest request, HttpServletResponse response) throws Exception {
-
-        String entity = IOUtils.toString(request.getInputStream(), "UTF-8");
-        String keys = JSON.parseObject(entity).getString("keys");
-        String keySplitter = ",";
-        Map<String, Datum> datumMap = new HashMap<>(64);
-        for (String key : keys.split(keySplitter)) {
-            datumMap.put(key, consistencyService.get(key));
-        }
-        response.getWriter().write(new String(serializer.serialize(datumMap), StandardCharsets.UTF_8));
-    }
-
-    @RequestMapping(value = "/datums", method = RequestMethod.GET)
-    public void getAllDatums(HttpServletRequest request, HttpServletResponse response) throws Exception {
-        response.getWriter().write(new String(serializer.serialize(dataStore.getDataMap()), StandardCharsets.UTF_8));
-    }
+  /**
+   * 响应其它 nacos 节点全量数据查询请求, 会把本地内存存储全部数据(都是服务发现相关的)返回给对方.
+   * 
+   * @param request
+   * @param response
+   * @throws Exception
+   */
+  @RequestMapping(value = "/datums", method = RequestMethod.GET)
+  public void getAllDatums(HttpServletRequest request, HttpServletResponse response) throws Exception {
+    response.getWriter().write(new String(serializer.serialize(dataStore.getDataMap()), StandardCharsets.UTF_8));
+  }
 }

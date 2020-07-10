@@ -44,6 +44,8 @@ public class Server implements Comparable<Server> {
 
     /**
      * additional weight, used to adjust manually
+     * <p>
+     * adWeigth 在人为干预服务器实例承载流量权重时候使用（见 Web UI 的 ServiceManagement->ServiceList->Details->cluster->某个 IP 行的 weight 编辑）。
      */
     private int adWeight;
 
@@ -117,10 +119,17 @@ public class Server implements Comparable<Server> {
         this.lastRefTimeStr = lastRefTimeStr;
     }
 
+    /**
+     * 以 IP:Port 作为一个实例的 key
+     * @return
+     */
     public String getKey() {
         return ip + UtilsAndCommons.IP_PORT_SPLITER + servePort;
     }
 
+    /**
+     * IP:Port 相同即为同一个 server
+     */
     @Override
     public boolean equals(Object o) {
         if (this == o) {

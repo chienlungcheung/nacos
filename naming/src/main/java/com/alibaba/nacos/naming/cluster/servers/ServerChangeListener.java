@@ -19,8 +19,8 @@ import java.util.List;
 
 /**
  * Nacos cluster member change event listener
- *
- * nacos 集群成员变动事件监听器接口
+ * <p>
+ * ServerChangeListener 会被用于 Nacos 本身集群的成员管理（下线或新增）以及服务发现（更新 nacos 服务对应的最新的可达实例列表）。
  *
  * @author nkorange
  * @since 1.0.0
@@ -31,6 +31,8 @@ public interface ServerChangeListener {
      * If member list changed, this method is invoked.
      *
      * 如果集群成员列表变化，该方法会被调用。
+     * <p>
+     * 目前仅被 nacos 本身使用（见 RaftPeerSet）。
      *
      * @param servers servers after change
      */
@@ -40,6 +42,8 @@ public interface ServerChangeListener {
      * If reachable member list changed, this method is invoked.
      *
      * 如果集群可达成员列表有变化，该方法会被调用。
+     * <p>
+     * 目前仅被用于服务发现（见 DistroMapper）。
      *
      * @param healthyServer reachable servers after change
      */

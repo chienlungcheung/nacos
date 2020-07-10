@@ -44,6 +44,7 @@ import java.util.Properties;
 import java.util.concurrent.ConcurrentMap;
 
 /**
+ * RaftStore 负责集群数据的持久化，提供了读写接口。
  * @author nacos
  */
 @Component

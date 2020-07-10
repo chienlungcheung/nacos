@@ -26,6 +26,8 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
+ * 集群健康检查的抽象实现以及四个具体实现(Tcp/Http/MySql/None)。
+ * 
  * @author nkorange
  */
 public abstract class AbstractHealthChecker implements Cloneable {

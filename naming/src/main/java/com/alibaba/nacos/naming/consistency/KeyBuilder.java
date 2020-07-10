@@ -26,144 +26,162 @@ import org.apache.commons.lang3.StringUtils;
  */
 public class KeyBuilder {
 
-    public static final String NAMESPACE_KEY_CONNECTOR = "##";
+  public static final String NAMESPACE_KEY_CONNECTOR = "##";
 
-    private static final String EPHEMERAL_KEY_PREFIX = "ephemeral.";
+  private static final String EPHEMERAL_KEY_PREFIX = "ephemeral.";
 
-    public static final String SERVICE_META_KEY_PREFIX = "com.alibaba.nacos.naming.domains.meta.";
+  public static final String SERVICE_META_KEY_PREFIX = "com.alibaba.nacos.naming.domains.meta.";
 
-    public static final String INSTANCE_LIST_KEY_PREFIX = "com.alibaba.nacos.naming.iplist.";
+  public static final String INSTANCE_LIST_KEY_PREFIX = "com.alibaba.nacos.naming.iplist.";
 
-    public static final String BRIEF_SERVICE_META_KEY_PREFIX = "meta.";
+  public static final String BRIEF_SERVICE_META_KEY_PREFIX = "meta.";
 
-    public static final String BRIEF_INSTANCE_LIST_KEY_PREFIX = "iplist.";
+  public static final String BRIEF_INSTANCE_LIST_KEY_PREFIX = "iplist.";
 
-    private static String buildEphemeralInstanceListKey(String namespaceId, String serviceName) {
-        return INSTANCE_LIST_KEY_PREFIX + EPHEMERAL_KEY_PREFIX + namespaceId + NAMESPACE_KEY_CONNECTOR
-            + serviceName;
+  private static String buildEphemeralInstanceListKey(String namespaceId, String serviceName) {
+    return INSTANCE_LIST_KEY_PREFIX + EPHEMERAL_KEY_PREFIX + namespaceId + NAMESPACE_KEY_CONNECTOR + serviceName;
+  }
+
+  private static String buildPersistentInstanceListKey(String namespaceId, String serviceName) {
+    return INSTANCE_LIST_KEY_PREFIX + namespaceId + NAMESPACE_KEY_CONNECTOR + serviceName;
+  }
+
+  public static String buildInstanceListKey(String namespaceId, String serviceName, boolean ephemeral) {
+    return ephemeral ? buildEphemeralInstanceListKey(namespaceId, serviceName)
+        : buildPersistentInstanceListKey(namespaceId, serviceName);
+  }
+
+  /**
+   * 把 namespaceId 和 serviceName 使用连接符 ‘##’ 追加到
+   * com.alibaba.nacos.naming.domains.meta. 之后
+   * 
+   * @param namespaceId
+   * @param serviceName
+   * @return
+   */
+  public static String buildServiceMetaKey(String namespaceId, String serviceName) {
+    return SERVICE_META_KEY_PREFIX + namespaceId + NAMESPACE_KEY_CONNECTOR + serviceName;
+  }
+
+  public static String getSwitchDomainKey() {
+    return SERVICE_META_KEY_PREFIX + UtilsAndCommons.SWITCH_DOMAIN_NAME;
+  }
+
+  /**
+   * 确认 key 是否为临时的服务实例(基于 key 前缀判断).
+   * 
+   * @param key
+   * @return
+   */
+  public static boolean matchEphemeralInstanceListKey(String key) {
+    return key.startsWith(INSTANCE_LIST_KEY_PREFIX + EPHEMERAL_KEY_PREFIX);
+  }
+
+  public static boolean matchInstanceListKey(String key) {
+    return key.startsWith(INSTANCE_LIST_KEY_PREFIX) || key.startsWith(BRIEF_INSTANCE_LIST_KEY_PREFIX);
+  }
+
+  public static boolean matchServiceMetaKey(String key) {
+    return key.startsWith(SERVICE_META_KEY_PREFIX) || key.startsWith(BRIEF_SERVICE_META_KEY_PREFIX);
+  }
+
+  public static boolean matchSwitchKey(String key) {
+    return key.endsWith(UtilsAndCommons.SWITCH_DOMAIN_NAME);
+  }
+
+  public static boolean matchServiceName(String key, String namespaceId, String serviceName) {
+    return key.endsWith(namespaceId + NAMESPACE_KEY_CONNECTOR + serviceName);
+  }
+
+  public static boolean matchServiceMetaKey(String key, String namespaceId, String serviceName) {
+    return matchServiceMetaKey(key) && matchServiceName(key, namespaceId, serviceName);
+  }
+
+  public static boolean matchInstanceListKey(String key, String namespaceId, String serviceName) {
+    return matchInstanceListKey(key) && matchServiceName(key, namespaceId, serviceName);
+  }
+
+  /**
+   * 检查 key 对应的是否为临时数据（当前仅服务发现类的实例的 key 为临时的）
+   * 
+   * @param key
+   * @return
+   */
+  public static boolean matchEphemeralKey(String key) {
+    // currently only instance list has ephemeral type:
+    return matchEphemeralInstanceListKey(key);
+  }
+
+  public static boolean matchPersistentKey(String key) {
+    return !matchEphemeralKey(key);
+  }
+
+  public static String briefInstanceListkey(String key) {
+    return BRIEF_INSTANCE_LIST_KEY_PREFIX + key.split(INSTANCE_LIST_KEY_PREFIX)[1];
+  }
+
+  /**
+   * 把 key 截短，只要后面的部分
+   *
+   * @param key
+   * @return
+   */
+  public static String briefServiceMetaKey(String key) {
+    return BRIEF_SERVICE_META_KEY_PREFIX + key.split(SERVICE_META_KEY_PREFIX)[1];
+  }
+
+  /**
+   * 将 {@code key} 恢复到长格式。
+   *
+   * @param key
+   * @return
+   */
+  public static String detailInstanceListkey(String key) {
+    return INSTANCE_LIST_KEY_PREFIX.substring(0, INSTANCE_LIST_KEY_PREFIX.indexOf(BRIEF_INSTANCE_LIST_KEY_PREFIX))
+        + key;
+  }
+
+  /**
+   * 将 {@code key} 恢复到长格式。
+   *
+   * @param key
+   * @return
+   */
+  public static String detailServiceMetaKey(String key) {
+    return SERVICE_META_KEY_PREFIX.substring(0, SERVICE_META_KEY_PREFIX.indexOf(BRIEF_SERVICE_META_KEY_PREFIX)) + key;
+  }
+
+  /**
+   * 从 datum key 中提取 namespace id
+   *
+   * @param key
+   * @return
+   */
+  public static String getNamespace(String key) {
+
+    if (matchSwitchKey(key)) {
+      return StringUtils.EMPTY;
     }
 
-    private static String buildPersistentInstanceListKey(String namespaceId, String serviceName) {
-        return INSTANCE_LIST_KEY_PREFIX + namespaceId + NAMESPACE_KEY_CONNECTOR
-            + serviceName;
+    // 举例：com.alibaba.nacos.naming.domains.meta.a621cf49-c80d-4865-82b5-27586a3bb604##test@@test-grpc
+    // 返回的就是 a621cf49-c80d-4865-82b5-27586a3bb604
+    if (matchServiceMetaKey(key)) {
+      return key.split(NAMESPACE_KEY_CONNECTOR)[0].substring(SERVICE_META_KEY_PREFIX.length());
     }
 
-    public static String buildInstanceListKey(String namespaceId, String serviceName, boolean ephemeral) {
-        return ephemeral ? buildEphemeralInstanceListKey(namespaceId, serviceName) :
-            buildPersistentInstanceListKey(namespaceId, serviceName);
+    if (matchEphemeralInstanceListKey(key)) {
+      return key.split(NAMESPACE_KEY_CONNECTOR)[0]
+          .substring(INSTANCE_LIST_KEY_PREFIX.length() + EPHEMERAL_KEY_PREFIX.length());
     }
 
-    public static String buildServiceMetaKey(String namespaceId, String serviceName) {
-        return SERVICE_META_KEY_PREFIX + namespaceId + NAMESPACE_KEY_CONNECTOR + serviceName;
+    if (matchInstanceListKey(key)) {
+      return key.split(NAMESPACE_KEY_CONNECTOR)[0].substring(INSTANCE_LIST_KEY_PREFIX.length());
     }
 
-    public static String getSwitchDomainKey() {
-        return SERVICE_META_KEY_PREFIX + UtilsAndCommons.SWITCH_DOMAIN_NAME;
-    }
+    return StringUtils.EMPTY;
+  }
 
-    public static boolean matchEphemeralInstanceListKey(String key) {
-        return key.startsWith(INSTANCE_LIST_KEY_PREFIX + EPHEMERAL_KEY_PREFIX);
-    }
-
-    public static boolean matchInstanceListKey(String key) {
-        return key.startsWith(INSTANCE_LIST_KEY_PREFIX) || key.startsWith(BRIEF_INSTANCE_LIST_KEY_PREFIX);
-    }
-
-    public static boolean matchServiceMetaKey(String key) {
-        return key.startsWith(SERVICE_META_KEY_PREFIX) || key.startsWith(BRIEF_SERVICE_META_KEY_PREFIX);
-    }
-
-    public static boolean matchSwitchKey(String key) {
-        return key.endsWith(UtilsAndCommons.SWITCH_DOMAIN_NAME);
-    }
-
-    public static boolean matchServiceName(String key, String namespaceId, String serviceName) {
-        return key.endsWith(namespaceId + NAMESPACE_KEY_CONNECTOR + serviceName);
-    }
-
-    public static boolean matchServiceMetaKey(String key, String namespaceId, String serviceName) {
-        return matchServiceMetaKey(key) && matchServiceName(key, namespaceId, serviceName);
-    }
-
-    public static boolean matchInstanceListKey(String key, String namespaceId, String serviceName) {
-        return matchInstanceListKey(key) && matchServiceName(key, namespaceId, serviceName);
-    }
-
-    public static boolean matchEphemeralKey(String key) {
-        // currently only instance list has ephemeral type:
-        return matchEphemeralInstanceListKey(key);
-    }
-
-    public static boolean matchPersistentKey(String key) {
-        return !matchEphemeralKey(key);
-    }
-
-    public static String briefInstanceListkey(String key) {
-        return BRIEF_INSTANCE_LIST_KEY_PREFIX + key.split(INSTANCE_LIST_KEY_PREFIX)[1];
-    }
-
-    /**
-     * 把 key 截短，只要后面的部分
-     *
-     * @param key
-     * @return
-     */
-    public static String briefServiceMetaKey(String key) {
-        return BRIEF_SERVICE_META_KEY_PREFIX + key.split(SERVICE_META_KEY_PREFIX)[1];
-    }
-
-    /**
-     * 将 {@code key} 恢复到长格式。
-     *
-     * @param key
-     * @return
-     */
-    public static String detailInstanceListkey(String key) {
-        return INSTANCE_LIST_KEY_PREFIX.substring(0, INSTANCE_LIST_KEY_PREFIX.indexOf(BRIEF_INSTANCE_LIST_KEY_PREFIX))
-            + key;
-    }
-
-    /**
-     * 将 {@code key} 恢复到长格式。
-     *
-     * @param key
-     * @return
-     */
-    public static String detailServiceMetaKey(String key) {
-        return SERVICE_META_KEY_PREFIX.substring(0, SERVICE_META_KEY_PREFIX.indexOf(BRIEF_SERVICE_META_KEY_PREFIX))
-            + key;
-    }
-
-    /**
-     * 从 datum key 中提取 namespace id
-     *
-     * @param key
-     * @return
-     */
-    public static String getNamespace(String key) {
-
-        if (matchSwitchKey(key)) {
-            return StringUtils.EMPTY;
-        }
-
-        // 举例：com.alibaba.nacos.naming.domains.meta.a621cf49-c80d-4865-82b5-27586a3bb604##test@@test-grpc
-        // 返回的就是 a621cf49-c80d-4865-82b5-27586a3bb604
-        if (matchServiceMetaKey(key)) {
-            return key.split(NAMESPACE_KEY_CONNECTOR)[0].substring(SERVICE_META_KEY_PREFIX.length());
-        }
-
-        if (matchEphemeralInstanceListKey(key)) {
-            return key.split(NAMESPACE_KEY_CONNECTOR)[0].substring(INSTANCE_LIST_KEY_PREFIX.length() + EPHEMERAL_KEY_PREFIX.length());
-        }
-
-        if (matchInstanceListKey(key)) {
-            return key.split(NAMESPACE_KEY_CONNECTOR)[0].substring(INSTANCE_LIST_KEY_PREFIX.length());
-        }
-
-        return StringUtils.EMPTY;
-    }
-
-    public static String getServiceName(String key) {
-        return key.split(NAMESPACE_KEY_CONNECTOR)[1];
-    }
+  public static String getServiceName(String key) {
+    return key.split(NAMESPACE_KEY_CONNECTOR)[1];
+  }
 }

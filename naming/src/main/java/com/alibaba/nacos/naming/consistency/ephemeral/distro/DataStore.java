@@ -34,54 +34,64 @@ import java.util.concurrent.ConcurrentHashMap;
 @Component
 public class DataStore {
 
-    private Map<String, Datum> dataMap = new ConcurrentHashMap<>(1024);
+  /**
+   * 临时数据仅存在与内存中。其中 key 为某个服务的标识，value 为包含 Instances 的 Datum。
+   * <p>
+   * 既然负责 Naming 相关功能，则 key 为 serviceName，value 为 Instances（即服务实例列表）
+   */
+  private Map<String, Datum> dataMap = new ConcurrentHashMap<>(1024);
 
-    public void put(String key, Datum value) {
-        dataMap.put(key, value);
+  public void put(String key, Datum value) {
+    dataMap.put(key, value);
+  }
+
+  public Datum remove(String key) {
+    return dataMap.remove(key);
+  }
+
+  public Set<String> keys() {
+    return dataMap.keySet();
+  }
+
+  public Datum get(String key) {
+    return dataMap.get(key);
+  }
+
+  public boolean contains(String key) {
+    return dataMap.containsKey(key);
+  }
+
+  public Map<String, Datum> batchGet(List<String> keys) {
+    Map<String, Datum> map = new HashMap<>(128);
+    for (String key : keys) {
+      if (!dataMap.containsKey(key)) {
+        continue;
+      }
+      map.put(key, dataMap.get(key));
     }
+    return map;
+  }
 
-    public Datum remove(String key) {
-        return dataMap.remove(key);
-    }
-
-    public Set<String> keys() {
-        return dataMap.keySet();
-    }
-
-    public Datum get(String key) {
-        return dataMap.get(key);
-    }
-
-    public boolean contains(String key) {
-        return dataMap.containsKey(key);
-    }
-
-    public Map<String, Datum> batchGet(List<String> keys) {
-        Map<String, Datum> map = new HashMap<>(128);
-        for (String key : keys) {
-            if (!dataMap.containsKey(key)) {
-                continue;
-            }
-            map.put(key, dataMap.get(key));
+  /**
+   * 获取实例总数
+   * 
+   * @return
+   */
+  public int getInstanceCount() {
+    int count = 0;
+    for (Map.Entry<String, Datum> entry : dataMap.entrySet()) {
+      try {
+        Datum instancesDatum = entry.getValue();
+        if (instancesDatum.value instanceof Instances) {
+          count += ((Instances) instancesDatum.value).getInstanceList().size();
         }
-        return map;
+      } catch (Exception ignore) {
+      }
     }
+    return count;
+  }
 
-    public int getInstanceCount() {
-        int count = 0;
-        for (Map.Entry<String, Datum> entry : dataMap.entrySet()) {
-            try {
-                Datum instancesDatum = entry.getValue();
-                if (instancesDatum.value instanceof Instances) {
-                    count += ((Instances) instancesDatum.value).getInstanceList().size();
-                }
-            } catch (Exception ignore) {
-            }
-        }
-        return count;
-    }
-
-    public Map<String, Datum> getDataMap() {
-        return dataMap;
-    }
+  public Map<String, Datum> getDataMap() {
+    return dataMap;
+  }
 }

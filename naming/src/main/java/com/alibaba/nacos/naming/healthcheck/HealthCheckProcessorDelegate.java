@@ -30,34 +30,38 @@ import java.util.stream.Collectors;
 @Component("healthCheckDelegate")
 public class HealthCheckProcessorDelegate implements HealthCheckProcessor {
 
-    private Map<String, HealthCheckProcessor> healthCheckProcessorMap
-        = new HashMap<>();
+  private Map<String, HealthCheckProcessor> healthCheckProcessorMap = new HashMap<>();
 
-    public HealthCheckProcessorDelegate(HealthCheckExtendProvider provider) {
-        provider.init();
+  public HealthCheckProcessorDelegate(HealthCheckExtendProvider provider) {
+    provider.init();
+  }
+
+  @Autowired
+  public void addProcessor(Collection<HealthCheckProcessor> processors) {
+    healthCheckProcessorMap.putAll(processors.stream().filter(processor -> processor.getType() != null)
+        .collect(Collectors.toMap(HealthCheckProcessor::getType, processor -> processor)));
+  }
+
+  /**
+   * 根据
+   */
+  @Override
+  public void process(HealthCheckTask task) {
+
+    // chcker 和 processor 的 type 一一对应，目前有四种
+    String type = task.getCluster().getHealthChecker().getType();
+    // 根据 checker 的 type 找到对应的 processor
+    HealthCheckProcessor processor = healthCheckProcessorMap.get(type);
+    if (processor == null) {
+      processor = healthCheckProcessorMap.get("none");
     }
 
-    @Autowired
-    public void addProcessor(Collection<HealthCheckProcessor> processors){
-        healthCheckProcessorMap.putAll(processors.stream()
-            .filter(processor -> processor.getType() != null)
-            .collect(Collectors.toMap(HealthCheckProcessor::getType, processor -> processor)));
-    }
+    // 运行 task
+    processor.process(task);
+  }
 
-    @Override
-    public void process(HealthCheckTask task) {
-
-        String type = task.getCluster().getHealthChecker().getType();
-        HealthCheckProcessor processor = healthCheckProcessorMap.get(type);
-        if(processor == null){
-            processor = healthCheckProcessorMap.get("none");
-        }
-
-        processor.process(task);
-    }
-
-    @Override
-    public String getType() {
-        return null;
-    }
+  @Override
+  public String getType() {
+    return null;
+  }
 }

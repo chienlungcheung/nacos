@@ -15,7 +15,6 @@
  */
 package com.alibaba.nacos.naming.healthcheck;
 
-
 import com.alibaba.fastjson.annotation.JSONField;
 import com.alibaba.nacos.naming.boot.SpringContext;
 import com.alibaba.nacos.naming.core.Cluster;
@@ -30,63 +29,67 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * Thread to update ephemeral instance triggered by client beat
- *
+ * <p>
+ * ClientBeatProcessor 负责处理客户端(即 instance)发来的心跳，在 Service.processClientBeat 中被调用。
+ * 
  * @author nkorange
  */
 public class ClientBeatProcessor implements Runnable {
-    public static final long CLIENT_BEAT_TIMEOUT = TimeUnit.SECONDS.toMillis(15);
-    private RsInfo rsInfo;
-    private Service service;
+  public static final long CLIENT_BEAT_TIMEOUT = TimeUnit.SECONDS.toMillis(15);
+  private RsInfo rsInfo;
+  private Service service;
 
-    @JSONField(serialize = false)
-    public PushService getPushService() {
-        return SpringContext.getAppContext().getBean(PushService.class);
+  @JSONField(serialize = false)
+  public PushService getPushService() {
+    return SpringContext.getAppContext().getBean(PushService.class);
+  }
+
+  public RsInfo getRsInfo() {
+    return rsInfo;
+  }
+
+  public void setRsInfo(RsInfo rsInfo) {
+    this.rsInfo = rsInfo;
+  }
+
+  public Service getService() {
+    return service;
+  }
+
+  public void setService(Service service) {
+    this.service = service;
+  }
+
+  @Override
+  public void run() {
+    Service service = this.service;
+    if (Loggers.EVT_LOG.isDebugEnabled()) {
+      Loggers.EVT_LOG.debug("[CLIENT-BEAT] processing beat: {}", rsInfo.toString());
     }
 
-    public RsInfo getRsInfo() {
-        return rsInfo;
-    }
+    String ip = rsInfo.getIp();
+    String clusterName = rsInfo.getCluster();
+    int port = rsInfo.getPort();
+    Cluster cluster = service.getClusterMap().get(clusterName);
+    List<Instance> instances = cluster.allIPs(true);
 
-    public void setRsInfo(RsInfo rsInfo) {
-        this.rsInfo = rsInfo;
-    }
-
-    public Service getService() {
-        return service;
-    }
-
-    public void setService(Service service) {
-        this.service = service;
-    }
-
-    @Override
-    public void run() {
-        Service service = this.service;
+    // 找到与心跳中 ip:port 一样的 instance，设置其最近心跳时间和健康状态
+    for (Instance instance : instances) {
+      if (instance.getIp().equals(ip) && instance.getPort() == port) {
         if (Loggers.EVT_LOG.isDebugEnabled()) {
-            Loggers.EVT_LOG.debug("[CLIENT-BEAT] processing beat: {}", rsInfo.toString());
+          Loggers.EVT_LOG.debug("[CLIENT-BEAT] refresh beat: {}", rsInfo.toString());
         }
-
-        String ip = rsInfo.getIp();
-        String clusterName = rsInfo.getCluster();
-        int port = rsInfo.getPort();
-        Cluster cluster = service.getClusterMap().get(clusterName);
-        List<Instance> instances = cluster.allIPs(true);
-
-        for (Instance instance : instances) {
-            if (instance.getIp().equals(ip) && instance.getPort() == port) {
-                if (Loggers.EVT_LOG.isDebugEnabled()) {
-                    Loggers.EVT_LOG.debug("[CLIENT-BEAT] refresh beat: {}", rsInfo.toString());
-                }
-                instance.setLastBeat(System.currentTimeMillis());
-                if (!instance.isMarked()) {
-                    if (!instance.isHealthy()) {
-                        instance.setHealthy(true);
-                        Loggers.EVT_LOG.info("service: {} {POS} {IP-ENABLED} valid: {}:{}@{}, region: {}, msg: client beat ok",
-                            cluster.getService().getName(), ip, port, cluster.getName(), UtilsAndCommons.LOCALHOST_SITE);
-                        getPushService().serviceChanged(service);
-                    }
-                }
-            }
+        // 设置最近心跳时间
+        instance.setLastBeat(System.currentTimeMillis());
+        if (!instance.isMarked()) {
+          if (!instance.isHealthy()) {
+            instance.setHealthy(true);
+            Loggers.EVT_LOG.info("service: {} {POS} {IP-ENABLED} valid: {}:{}@{}, region: {}, msg: client beat ok",
+                cluster.getService().getName(), ip, port, cluster.getName(), UtilsAndCommons.LOCALHOST_SITE);
+            getPushService().serviceChanged(service);
+          }
         }
+      }
     }
+  }
 }

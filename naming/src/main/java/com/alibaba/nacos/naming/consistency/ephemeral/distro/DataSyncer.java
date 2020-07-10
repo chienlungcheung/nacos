@@ -36,7 +36,10 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Data replicator
- *
+ * <p>
+ * DataSyncer 负责周期性地将当前实例负责的服务数据校验和同步给 nacos 集群其它全部可达的服务实例，实现 AP 的最终一致性；
+ * 同时它还提供了一个 submit 接口供外部有同步需求的类调用。
+ * 
  * @author nkorange
  * @since 1.0.0
  */
@@ -44,165 +47,205 @@ import java.util.concurrent.ConcurrentHashMap;
 @DependsOn("serverListManager")
 public class DataSyncer {
 
-    @Autowired
-    private DataStore dataStore;
+  @Autowired
+  private DataStore dataStore;
 
-    @Autowired
-    private GlobalConfig partitionConfig;
+  @Autowired
+  private GlobalConfig partitionConfig;
 
-    @Autowired
-    private Serializer serializer;
+  @Autowired
+  private Serializer serializer;
 
-    @Autowired
-    private DistroMapper distroMapper;
+  @Autowired
+  private DistroMapper distroMapper;
 
-    @Autowired
-    private ServerListManager serverListManager;
+  /**
+   * 负责提供 nacos 集群全部可达实例，发送数据时进行使用。
+   */
+  @Autowired
+  private ServerListManager serverListManager;
 
-    private Map<String, String> taskMap = new ConcurrentHashMap<>();
+  private Map<String, String> taskMap = new ConcurrentHashMap<>();
 
-    @PostConstruct
-    public void init() {
-        startTimedSync();
+  @PostConstruct
+  public void init() {
+    startTimedSync();
+  }
+
+  /**
+   * 该方法供有同步需求的外部类调用，负责提交一个 one-shot（但是同步失败会自动重试）数据同步任务到全局调度器。
+   * 
+   * @param task
+   * @param delay
+   */
+  public void submit(SyncTask task, long delay) {
+
+    // If it's a new task:
+    if (task.getRetryCount() == 0) {
+      Iterator<String> iterator = task.getKeys().iterator();
+      while (iterator.hasNext()) {
+        String key = iterator.next();
+        // 如果数据 key 正在同步给 server，则不再重复同步
+        if (StringUtils.isNotBlank(taskMap.putIfAbsent(buildKey(key, task.getTargetServer()), key))) {
+          // associated key already exist:
+          if (Loggers.DISTRO.isDebugEnabled()) {
+            Loggers.DISTRO.debug("sync already in process, key: {}", key);
+          }
+          iterator.remove();
+        }
+      }
     }
 
-    public void submit(SyncTask task, long delay) {
+    if (task.getKeys().isEmpty()) {
+      // all keys are removed:
+      return;
+    }
 
-        // If it's a new task:
-        if (task.getRetryCount() == 0) {
-            Iterator<String> iterator = task.getKeys().iterator();
-            while (iterator.hasNext()) {
-                String key = iterator.next();
-                if (StringUtils.isNotBlank(taskMap.putIfAbsent(buildKey(key, task.getTargetServer()), key))) {
-                    // associated key already exist:
-                    if (Loggers.DISTRO.isDebugEnabled()) {
-                        Loggers.DISTRO.debug("sync already in process, key: {}", key);
-                    }
-                    iterator.remove();
-                }
-            }
-        }
+    GlobalExecutor.submitDataSync(new Runnable() {
+      @Override
+      public void run() {
 
-        if (task.getKeys().isEmpty()) {
-            // all keys are removed:
+        try {
+          // 如果从当前实例到其它 nacos 服务实例均不可达，则不做同步操作了
+          if (getServers() == null || getServers().isEmpty()) {
+            Loggers.SRV_LOG.warn("try to sync data but server list is empty.");
             return;
-        }
+          }
 
-        GlobalExecutor.submitDataSync(new Runnable() {
-            @Override
-            public void run() {
+          List<String> keys = task.getKeys();
 
-                try {
-                    if (getServers() == null || getServers().isEmpty()) {
-                        Loggers.SRV_LOG.warn("try to sync data but server list is empty.");
-                        return;
-                    }
+          if (Loggers.DISTRO.isDebugEnabled()) {
+            Loggers.DISTRO.debug("sync keys: {}", keys);
+          }
 
-                    List<String> keys = task.getKeys();
+          // 获取待同步的数据
+          Map<String, Datum> datumMap = dataStore.batchGet(keys);
 
-                    if (Loggers.DISTRO.isDebugEnabled()) {
-                        Loggers.DISTRO.debug("sync keys: {}", keys);
-                    }
-
-                    Map<String, Datum> datumMap = dataStore.batchGet(keys);
-
-                    if (datumMap == null || datumMap.isEmpty()) {
-                        // clear all flags of this task:
-                        for (String key : task.getKeys()) {
-                            taskMap.remove(buildKey(key, task.getTargetServer()));
-                        }
-                        return;
-                    }
-
-                    byte[] data = serializer.serialize(datumMap);
-
-                    long timestamp = System.currentTimeMillis();
-                    boolean success = NamingProxy.syncData(data, task.getTargetServer());
-                    if (!success) {
-                        SyncTask syncTask = new SyncTask();
-                        syncTask.setKeys(task.getKeys());
-                        syncTask.setRetryCount(task.getRetryCount() + 1);
-                        syncTask.setLastExecuteTime(timestamp);
-                        syncTask.setTargetServer(task.getTargetServer());
-                        retrySync(syncTask);
-                    } else {
-                        // clear all flags of this task:
-                        for (String key : task.getKeys()) {
-                            taskMap.remove(buildKey(key, task.getTargetServer()));
-                        }
-                    }
-
-                } catch (Exception e) {
-                    Loggers.DISTRO.error("sync data failed.", e);
-                }
+          // 待同步数据为空，则全部键均无效，从同步任务删除，终止本次同步。
+          if (datumMap == null || datumMap.isEmpty()) {
+            // clear all flags of this task:
+            for (String key : task.getKeys()) {
+              taskMap.remove(buildKey(key, task.getTargetServer()));
             }
-        }, delay);
-    }
-
-    public void retrySync(SyncTask syncTask) {
-
-        Server server = new Server();
-        server.setIp(syncTask.getTargetServer().split(":")[0]);
-        server.setServePort(Integer.parseInt(syncTask.getTargetServer().split(":")[1]));
-        if (!getServers().contains(server)) {
-            // if server is no longer in healthy server list, ignore this task:
             return;
-        }
+          }
 
-        // TODO may choose other retry policy.
-        submit(syncTask, partitionConfig.getSyncRetryDelay());
-    }
+          // 将待同步数据序列化
+          byte[] data = serializer.serialize(datumMap);
 
-    public void startTimedSync() {
-        GlobalExecutor.schedulePartitionDataTimedSync(new TimedSync());
-    }
-
-    public class TimedSync implements Runnable {
-
-        @Override
-        public void run() {
-
-            try {
-
-                if (Loggers.DISTRO.isDebugEnabled()) {
-                    Loggers.DISTRO.debug("server list is: {}", getServers());
-                }
-
-                // send local timestamps to other servers:
-                Map<String, String> keyChecksums = new HashMap<>(64);
-                for (String key : dataStore.keys()) {
-                    if (!distroMapper.responsible(KeyBuilder.getServiceName(key))) {
-                        continue;
-                    }
-
-                    keyChecksums.put(key, dataStore.get(key).value.getChecksum());
-                }
-
-                if (keyChecksums.isEmpty()) {
-                    return;
-                }
-
-                if (Loggers.DISTRO.isDebugEnabled()) {
-                    Loggers.DISTRO.debug("sync checksums: {}", keyChecksums);
-                }
-
-                for (Server member : getServers()) {
-                    if (NetUtils.localServer().equals(member.getKey())) {
-                        continue;
-                    }
-                    NamingProxy.syncCheckSums(keyChecksums, member.getKey());
-                }
-            } catch (Exception e) {
-                Loggers.DISTRO.error("timed sync task failed.", e);
+          long timestamp = System.currentTimeMillis();
+          boolean success = NamingProxy.syncData(data, task.getTargetServer());
+          // 如果同步失败，则重新同步
+          if (!success) {
+            SyncTask syncTask = new SyncTask();
+            syncTask.setKeys(task.getKeys());
+            // 重试次数加一
+            syncTask.setRetryCount(task.getRetryCount() + 1);
+            // 记录上次同步时间
+            syncTask.setLastExecuteTime(timestamp);
+            syncTask.setTargetServer(task.getTargetServer());
+            retrySync(syncTask);
+          } else {
+            // 如果同步成功，则将其对应的 keys 从暂存区删除避免重复同步
+            // clear all flags of this task:
+            for (String key : task.getKeys()) {
+              taskMap.remove(buildKey(key, task.getTargetServer()));
             }
+          }
+
+        } catch (Exception e) {
+          Loggers.DISTRO.error("sync data failed.", e);
         }
+      }
+    }, delay);
+  }
+
+  /**
+   * 重新提交同步任务
+   * 
+   * @param syncTask
+   */
+  public void retrySync(SyncTask syncTask) {
+
+    Server server = new Server();
+    server.setIp(syncTask.getTargetServer().split(":")[0]);
+    server.setServePort(Integer.parseInt(syncTask.getTargetServer().split(":")[1]));
+    // 如果目标实例不可达了，则不重试了
+    if (!getServers().contains(server)) {
+      // if server is no longer in healthy server list, ignore this task:
+      return;
     }
 
-    public List<Server> getServers() {
-        return serverListManager.getHealthyServers();
-    }
+    // TODO may choose other retry policy.
+    submit(syncTask, partitionConfig.getSyncRetryDelay());
+  }
 
-    public String buildKey(String key, String targetServer) {
-        return key + UtilsAndCommons.CACHE_KEY_SPLITER + targetServer;
+  /**
+   * 提交一个定时同步任务 TimedSync 到全局调度器，该任务周期性被执行。
+   */
+  public void startTimedSync() {
+    GlobalExecutor.schedulePartitionDataTimedSync(new TimedSync());
+  }
+
+  /**
+   * 该任务被周期性调度，负责将本实例负责的全部服务信息的校验和同步给从当前实例可达的 nacos 集群其它全部服务实例。
+   */
+  public class TimedSync implements Runnable {
+
+    @Override
+    public void run() {
+
+      try {
+
+        if (Loggers.DISTRO.isDebugEnabled()) {
+          Loggers.DISTRO.debug("server list is: {}", getServers());
+        }
+
+        // send local timestamps to other servers:
+        Map<String, String> keyChecksums = new HashMap<>(64);
+        // 获取本地存储的数据的校验和
+        for (String key : dataStore.keys()) {
+          if (!distroMapper.responsible(KeyBuilder.getServiceName(key))) {
+            continue;
+          }
+
+          keyChecksums.put(key, dataStore.get(key).value.getChecksum());
+        }
+
+        if (keyChecksums.isEmpty()) {
+          return;
+        }
+
+        if (Loggers.DISTRO.isDebugEnabled()) {
+          Loggers.DISTRO.debug("sync checksums: {}", keyChecksums);
+        }
+
+        /**
+         * 将本地存储的每个数据项的校验和发给其它可达的 nacos 服务实例
+         */
+        for (Server member : getServers()) {
+          // 自己有，不用发给自己
+          if (NetUtils.localServer().equals(member.getKey())) {
+            continue;
+          }
+          NamingProxy.syncCheckSums(keyChecksums, member.getKey());
+        }
+      } catch (Exception e) {
+        Loggers.DISTRO.error("timed sync task failed.", e);
+      }
     }
+  }
+
+  /**
+   * 返回从当前实例可达的 nacos 其它服务实例列表
+   * 
+   * @return
+   */
+  public List<Server> getServers() {
+    return serverListManager.getHealthyServers();
+  }
+
+  public String buildKey(String key, String targetServer) {
+    return key + UtilsAndCommons.CACHE_KEY_SPLITER + targetServer;
+  }
 }

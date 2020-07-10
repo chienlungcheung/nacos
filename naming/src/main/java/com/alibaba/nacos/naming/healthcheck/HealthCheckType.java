@@ -23,60 +23,61 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
+ * 针对集群的健康检查类型(用于服务发现)
+ * 
  * @author nkorange
  */
 public enum HealthCheckType {
-    /**
-     * TCP type
-     */
-    TCP("tcp", AbstractHealthChecker.Tcp.class),
-    /**
-     * HTTP type
-     */
-    HTTP("http", AbstractHealthChecker.Http.class),
-    /**
-     * MySQL type
-     */
-    MYSQL("mysql", AbstractHealthChecker.Mysql.class),
-    /**
-     * No check
-     */
-    NONE("none", AbstractHealthChecker.None.class);
+  /**
+   * TCP type
+   */
+  TCP("tcp", AbstractHealthChecker.Tcp.class),
+  /**
+   * HTTP type
+   */
+  HTTP("http", AbstractHealthChecker.Http.class),
+  /**
+   * MySQL type
+   */
+  MYSQL("mysql", AbstractHealthChecker.Mysql.class),
+  /**
+   * No check
+   */
+  NONE("none", AbstractHealthChecker.None.class);
 
-    private String name;
+  private String name;
 
-    private Class healthCheckerClass;
+  private Class healthCheckerClass;
 
-    private static Map<String, Class> EXTEND =
-        new ConcurrentHashMap<>();
+  private static Map<String, Class> EXTEND = new ConcurrentHashMap<>();
 
-    HealthCheckType(String name, Class healthCheckerClass) {
-        this.name = name;
-        this.healthCheckerClass = healthCheckerClass;
+  HealthCheckType(String name, Class healthCheckerClass) {
+    this.name = name;
+    this.healthCheckerClass = healthCheckerClass;
+  }
+
+  public static void registerHealthChecker(String type, Class healthCheckerClass) {
+    EXTEND.putIfAbsent(type, healthCheckerClass);
+  }
+
+  public static Class ofHealthCheckerClass(String type) {
+    HealthCheckType enumType;
+    try {
+      enumType = valueOf(type);
+    } catch (Exception e) {
+      return EXTEND.get(type);
     }
+    return enumType.healthCheckerClass;
+  }
 
-    public static void registerHealthChecker(String type, Class healthCheckerClass){
-        EXTEND.putIfAbsent(type, healthCheckerClass);
+  public static List<Class> getLoadedHealthCheckerClasses() {
+    List<Class> all = new ArrayList<>();
+    for (HealthCheckType type : values()) {
+      all.add(type.healthCheckerClass);
     }
-
-    public static Class ofHealthCheckerClass(String type){
-        HealthCheckType enumType;
-        try {
-            enumType = valueOf(type);
-        }catch (Exception e){
-            return EXTEND.get(type);
-        }
-        return enumType.healthCheckerClass;
+    for (Map.Entry<String, Class> entry : EXTEND.entrySet()) {
+      all.add(entry.getValue());
     }
-
-    public static List<Class> getLoadedHealthCheckerClasses(){
-        List<Class> all = new ArrayList<>();
-        for(HealthCheckType type : values()){
-            all.add(type.healthCheckerClass);
-        }
-        for(Map.Entry<String, Class> entry : EXTEND.entrySet()){
-            all.add(entry.getValue());
-        }
-        return all;
-    }
+    return all;
+  }
 }

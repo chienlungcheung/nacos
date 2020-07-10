@@ -23,12 +23,19 @@ import java.util.Objects;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * 基于 raft 算法实现的集群中的一个节点
- *
+ * RaftPeer 是对 raft 算法描述的集群节点的抽象和实现。
+ * <p>
+ * 状态包括：
+ * <li> 需要持久化的状态 currentTerm、votedFor、log[]，
+ * <li> 易变的状态 commitIndex、lastApplied、nextIndex[]、matchIndex[]，其中后两者专属于 leader 节点。
+ *  
  * @author nacos
  */
 public class RaftPeer {
 
+    /**
+     * 该值可以作为节点的 ID 使用，在集群中唯一标识一个 raft 节点
+     */
     public String ip;
 
     /**

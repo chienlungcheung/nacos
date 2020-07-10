@@ -70,6 +70,8 @@ public class SwitchDomain implements Record, Cloneable {
 
     /**
      * The server is regarded as expired if its two reporting interval is lagger than this variable.
+     * <p>
+     * 如果间隔上次超过 30s 未收到新的心跳，则认为服务器实例下线。
      */
     private long distroServerExpiredMillis = TimeUnit.SECONDS.toMillis(30);
 

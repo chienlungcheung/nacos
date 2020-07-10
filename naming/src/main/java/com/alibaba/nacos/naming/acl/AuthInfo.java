@@ -18,6 +18,8 @@ package com.alibaba.nacos.naming.acl;
 import java.nio.charset.StandardCharsets;
 
 /**
+ * 认证信息
+ * 
  * @author nkorange
  */
 public class AuthInfo {

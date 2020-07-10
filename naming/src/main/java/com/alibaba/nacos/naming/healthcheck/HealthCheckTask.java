@@ -24,149 +24,164 @@ import com.alibaba.nacos.naming.misc.SwitchDomain;
 import org.apache.commons.lang3.RandomUtils;
 
 /**
+ * 每个集群(cluster)一个健康检查任务。集群初始化时创建健康检查任务，然后周期性调度之（周期性靠自己调度自己来实现，具体见 run 的
+ * finally）。
+ * <p>
+ * 其内包含了集群相关信息，以及执行本 task 的 processor 是哪个（task 会在自己的 run 方法中调用
+ * processor，后者再处理前者，设计有点别扭）。
+ * 
  * @author nacos
  */
 public class HealthCheckTask implements Runnable {
 
-    private Cluster cluster;
+  private Cluster cluster;
 
-    private long checkRTNormalized = -1;
-    private long checkRTBest = -1;
-    private long checkRTWorst = -1;
+  /**
+   * 每次健康检查 Round-Trip 的移动加权平均值
+   */
+  private long checkRTNormalized = -1;
+  private long checkRTBest = -1;
+  private long checkRTWorst = -1;
 
-    private long checkRTLast = -1;
-    private long checkRTLastLast = -1;
+  /**
+   * 上一次健康检查 round-trip 耗时
+   */
+  private long checkRTLast = -1;
+  private long checkRTLastLast = -1;
 
-    private long startTime;
+  private long startTime;
 
-    private volatile boolean cancelled = false;
+  private volatile boolean cancelled = false;
 
-    @JSONField(serialize = false)
-    private DistroMapper distroMapper;
+  @JSONField(serialize = false)
+  private DistroMapper distroMapper;
 
-    @JSONField(serialize = false)
-    private SwitchDomain switchDomain;
+  @JSONField(serialize = false)
+  private SwitchDomain switchDomain;
 
-    @JSONField(serialize = false)
-    private HealthCheckProcessor healthCheckProcessor;
+  @JSONField(serialize = false)
+  private HealthCheckProcessor healthCheckProcessor;
 
-    public HealthCheckTask(Cluster cluster) {
-        this.cluster = cluster;
-        distroMapper = SpringContext.getAppContext().getBean(DistroMapper.class);
-        switchDomain = SpringContext.getAppContext().getBean(SwitchDomain.class);
-        healthCheckProcessor = SpringContext.getAppContext().getBean(HealthCheckProcessorDelegate.class);
-        initCheckRT();
-    }
+  public HealthCheckTask(Cluster cluster) {
+    this.cluster = cluster;
+    distroMapper = SpringContext.getAppContext().getBean(DistroMapper.class);
+    switchDomain = SpringContext.getAppContext().getBean(SwitchDomain.class);
+    // HealthCheckProcessor 目前有四种，可以根据集群特点进行配置
+    healthCheckProcessor = SpringContext.getAppContext().getBean(HealthCheckProcessorDelegate.class);
+    initCheckRT();
+  }
 
-    public void initCheckRT() {
-        // first check time delay
-        checkRTNormalized = 2000 + RandomUtils.nextInt(0, RandomUtils.nextInt(0, switchDomain.getTcpHealthParams().getMax()));
-        checkRTBest = Long.MAX_VALUE;
-        checkRTWorst = 0L;
-    }
+  public void initCheckRT() {
+    // first check time delay
+    checkRTNormalized = 2000
+        + RandomUtils.nextInt(0, RandomUtils.nextInt(0, switchDomain.getTcpHealthParams().getMax()));
+    checkRTBest = Long.MAX_VALUE;
+    checkRTWorst = 0L;
+  }
 
-    @Override
-    public void run() {
+  @Override
+  public void run() {
 
-        try {
-            if (distroMapper.responsible(cluster.getService().getName()) &&
-                switchDomain.isHealthCheckEnabled(cluster.getService().getName())) {
-                healthCheckProcessor.process(this);
-                if (Loggers.EVT_LOG.isDebugEnabled()) {
-                    Loggers.EVT_LOG.debug("[HEALTH-CHECK] schedule health check task: {}", cluster.getService().getName());
-                }
-            }
-        } catch (Throwable e) {
-            Loggers.SRV_LOG.error("[HEALTH-CHECK] error while process health check for {}:{}",
-                cluster.getService().getName(), cluster.getName(), e);
-        } finally {
-            if (!cancelled) {
-                HealthCheckReactor.scheduleCheck(this);
-
-                // worst == 0 means never checked
-                if (this.getCheckRTWorst() > 0
-                    && switchDomain.isHealthCheckEnabled(cluster.getService().getName())
-                    && distroMapper.responsible(cluster.getService().getName())) {
-                    // TLog doesn't support float so we must convert it into long
-                    long diff = ((this.getCheckRTLast() - this.getCheckRTLastLast()) * 10000)
-                        / this.getCheckRTLastLast();
-
-                    this.setCheckRTLastLast(this.getCheckRTLast());
-
-                    Cluster cluster = this.getCluster();
-
-                    if (Loggers.CHECK_RT.isDebugEnabled()) {
-                        Loggers.CHECK_RT.debug("{}:{}@{}->normalized: {}, worst: {}, best: {}, last: {}, diff: {}",
-                            cluster.getService().getName(), cluster.getName(), cluster.getHealthChecker().getType(),
-                            this.getCheckRTNormalized(), this.getCheckRTWorst(), this.getCheckRTBest(),
-                            this.getCheckRTLast(), diff);
-                    }
-                }
-            }
+    try {
+      // 如果当前 nacos 实例负责维护该集群对应的服务，并且该集群开启了健康检查功能
+      if (distroMapper.responsible(cluster.getService().getName())
+          && switchDomain.isHealthCheckEnabled(cluster.getService().getName())) {
+        // 则把当前健康检查任务添加到健康检查处理器中
+        healthCheckProcessor.process(this);
+        if (Loggers.EVT_LOG.isDebugEnabled()) {
+          Loggers.EVT_LOG.debug("[HEALTH-CHECK] schedule health check task: {}", cluster.getService().getName());
         }
-    }
+      }
+    } catch (Throwable e) {
+      Loggers.SRV_LOG.error("[HEALTH-CHECK] error while process health check for {}:{}", cluster.getService().getName(),
+          cluster.getName(), e);
+    } finally {
+      if (!cancelled) {
+        // 如果任务未被取消，则将自己放到线程池实现重复调度
+        HealthCheckReactor.scheduleCheck(this);
 
-    public Cluster getCluster() {
-        return cluster;
-    }
+        // worst == 0 means never checked
+        if (this.getCheckRTWorst() > 0 && switchDomain.isHealthCheckEnabled(cluster.getService().getName())
+            && distroMapper.responsible(cluster.getService().getName())) {
+          // TLog doesn't support float so we must convert it into long
+          long diff = ((this.getCheckRTLast() - this.getCheckRTLastLast()) * 10000) / this.getCheckRTLastLast();
 
-    public void setCluster(Cluster cluster) {
-        this.cluster = cluster;
-    }
+          this.setCheckRTLastLast(this.getCheckRTLast());
 
-    public long getCheckRTNormalized() {
-        return checkRTNormalized;
-    }
+          Cluster cluster = this.getCluster();
 
-    public long getCheckRTBest() {
-        return checkRTBest;
+          if (Loggers.CHECK_RT.isDebugEnabled()) {
+            Loggers.CHECK_RT.debug("{}:{}@{}->normalized: {}, worst: {}, best: {}, last: {}, diff: {}",
+                cluster.getService().getName(), cluster.getName(), cluster.getHealthChecker().getType(),
+                this.getCheckRTNormalized(), this.getCheckRTWorst(), this.getCheckRTBest(), this.getCheckRTLast(),
+                diff);
+          }
+        }
+      }
     }
+  }
 
-    public long getCheckRTWorst() {
-        return checkRTWorst;
-    }
+  public Cluster getCluster() {
+    return cluster;
+  }
 
-    public void setCheckRTWorst(long checkRTWorst) {
-        this.checkRTWorst = checkRTWorst;
-    }
+  public void setCluster(Cluster cluster) {
+    this.cluster = cluster;
+  }
 
-    public void setCheckRTBest(long checkRTBest) {
-        this.checkRTBest = checkRTBest;
-    }
+  public long getCheckRTNormalized() {
+    return checkRTNormalized;
+  }
 
-    public void setCheckRTNormalized(long checkRTNormalized) {
-        this.checkRTNormalized = checkRTNormalized;
-    }
+  public long getCheckRTBest() {
+    return checkRTBest;
+  }
 
-    public boolean isCancelled() {
-        return cancelled;
-    }
+  public long getCheckRTWorst() {
+    return checkRTWorst;
+  }
 
-    public void setCancelled(boolean cancelled) {
-        this.cancelled = cancelled;
-    }
+  public void setCheckRTWorst(long checkRTWorst) {
+    this.checkRTWorst = checkRTWorst;
+  }
 
-    public long getStartTime() {
-        return startTime;
-    }
+  public void setCheckRTBest(long checkRTBest) {
+    this.checkRTBest = checkRTBest;
+  }
 
-    public void setStartTime(long startTime) {
-        this.startTime = startTime;
-    }
+  public void setCheckRTNormalized(long checkRTNormalized) {
+    this.checkRTNormalized = checkRTNormalized;
+  }
 
-    public long getCheckRTLast() {
-        return checkRTLast;
-    }
+  public boolean isCancelled() {
+    return cancelled;
+  }
 
-    public void setCheckRTLast(long checkRTLast) {
-        this.checkRTLast = checkRTLast;
-    }
+  public void setCancelled(boolean cancelled) {
+    this.cancelled = cancelled;
+  }
 
-    public long getCheckRTLastLast() {
-        return checkRTLastLast;
-    }
+  public long getStartTime() {
+    return startTime;
+  }
 
-    public void setCheckRTLastLast(long checkRTLastLast) {
-        this.checkRTLastLast = checkRTLastLast;
-    }
+  public void setStartTime(long startTime) {
+    this.startTime = startTime;
+  }
+
+  public long getCheckRTLast() {
+    return checkRTLast;
+  }
+
+  public void setCheckRTLast(long checkRTLast) {
+    this.checkRTLast = checkRTLast;
+  }
+
+  public long getCheckRTLastLast() {
+    return checkRTLastLast;
+  }
+
+  public void setCheckRTLastLast(long checkRTLastLast) {
+    this.checkRTLastLast = checkRTLastLast;
+  }
 }

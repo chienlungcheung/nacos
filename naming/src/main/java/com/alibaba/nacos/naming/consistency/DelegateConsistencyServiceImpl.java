@@ -24,7 +24,10 @@ import org.springframework.stereotype.Service;
 
 /**
  * Consistency delegate
- *
+ * <p>
+ * 封装了两个一致性算法实现，一个是临时的，一个是持久化的。具体使用哪个取决于 key 对应的是否为临时数据。
+ * <p>
+ * 该类将会用于 ServiceManager 管理服务信息的一致性。
  * @author nkorange
  * @since 1.0.0
  */
