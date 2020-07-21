@@ -38,7 +38,7 @@ import java.util.List;
  * ClientBeatCheckTask 负责根据心跳是否超时（根据其上次心跳时间确认其是否很长时间未发送过心跳给当前 nacos 实例了）
  * 更新某个服务的全部实例的状态，如果有心跳超时的实例，则将其移除（在一致性算法实现进行维护，从而广播给其它 nacos 实例）。
  * <p>
- * 每个服务都有一个专门的 ClientBeatCheckTask 实例负责。
+ * 每个服务都有一个专门的 ClientBeatCheckTask 实例负责，服务初始化时候启动周期性任务运行之。
  * 
  * @author nkorange
  */
@@ -71,6 +71,11 @@ public class ClientBeatCheckTask implements Runnable {
     return service.getName();
   }
 
+  /**
+   * 检查每个实例，查看是否存在长时间未发送心跳到当前 nacos 节点的实例。
+   * <p>
+   * 如果存在则将其置为不健康，同时根据配置确定是否将其从集群中删除。
+   */
   @Override
   public void run() {
     try {
@@ -87,7 +92,9 @@ public class ClientBeatCheckTask implements Runnable {
       // first set health status of instances:
       for (Instance instance : instances) {
         if (System.currentTimeMillis() - instance.getLastBeat() > instance.getInstanceHeartBeatTimeOut()) {
+          // 如果实例被标记过无需做健康检查则跳过后面逻辑
           if (!instance.isMarked()) {
+            // 如果以前是健康状态则将其标记为不健康
             if (instance.isHealthy()) {
               instance.setHealthy(false);
               Loggers.EVT_LOG.info(
@@ -104,12 +111,12 @@ public class ClientBeatCheckTask implements Runnable {
         }
       }
 
-      // 检查全局配置，确认是否要终止掉死亡的实例
+      // 检查全局配置，确认是否要终止掉不健康的实例
       if (!getGlobalConfig().isExpireInstance()) {
         return;
       }
 
-      // 移除死亡实例
+      // 移除不健康实例
       // then remove obsolete instances:
       for (Instance instance : instances) {
 
@@ -131,7 +138,7 @@ public class ClientBeatCheckTask implements Runnable {
   }
 
   /**
-   * 给当前实例自己的 instance 接口（具体建 InstanceController.deregister 方法）发送一个异步删除请求，
+   * 给当前实例自己的 instance 接口（具体见 InstanceController.deregister 方法）发送一个异步删除请求，
    * 从对应服务的对应集群中删除参数指定的实例。
    * 
    * @param instance

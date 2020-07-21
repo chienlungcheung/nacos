@@ -30,7 +30,8 @@ import java.util.concurrent.TimeUnit;
 /**
  * Thread to update ephemeral instance triggered by client beat
  * <p>
- * ClientBeatProcessor 负责处理客户端(即 instance)发来的心跳，在 Service.processClientBeat 中被调用。
+ * ClientBeatProcessor 负责处理客户端(即 instance)发来的心跳，记录最近心跳时间，标记节点健康状态，发布服务变更事件等。
+ * 在 Service.processClientBeat 中被调用。
  * 
  * @author nkorange
  */
@@ -60,6 +61,9 @@ public class ClientBeatProcessor implements Runnable {
     this.service = service;
   }
 
+  /**
+   * 找到本次发送心跳的 Instance，记录本次心跳时间。如果其之前为不健康状态，则将其标记为健康同时发布一个服务变更事件。
+   */
   @Override
   public void run() {
     Service service = this.service;
@@ -81,7 +85,9 @@ public class ClientBeatProcessor implements Runnable {
         }
         // 设置最近心跳时间
         instance.setLastBeat(System.currentTimeMillis());
+        // 如果被标记过无需健康检查就可以跳过后面逻辑
         if (!instance.isMarked()) {
+          // 如果之前不健康则标记为健康，同时发布一个服务变更事件
           if (!instance.isHealthy()) {
             instance.setHealthy(true);
             Loggers.EVT_LOG.info("service: {} {POS} {IP-ENABLED} valid: {}:{}@{}, region: {}, msg: client beat ok",

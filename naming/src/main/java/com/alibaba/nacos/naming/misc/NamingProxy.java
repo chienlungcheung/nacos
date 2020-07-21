@@ -202,6 +202,16 @@ public class NamingProxy {
     return StringUtils.EMPTY;
   }
 
+  /**
+   * 发送 GET/POST 请求给目的地址的目的端口.
+   * 
+   * @param api       要发送到的目的接口
+   * @param params    要发送的参数
+   * @param curServer 目的地址
+   * @param isPost    true, 发送 POST 请求; 否则, 发送 GET 请求.
+   * @return
+   * @throws Exception
+   */
   public static String reqAPI(String api, Map<String, String> params, String curServer, boolean isPost)
       throws Exception {
     try {

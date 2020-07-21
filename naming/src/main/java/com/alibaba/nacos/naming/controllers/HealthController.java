@@ -47,6 +47,8 @@ import java.util.Map;
 
 /**
  * Health status related operation controller
+ * <p>
+ * 感觉没啥用的一个类。
  *
  * @author nkorange
  * @author nanamikon
@@ -65,6 +67,12 @@ public class HealthController {
   @Autowired
   private PushService pushService;
 
+  /**
+   * 响应外部查询当前 nacos 节点状态的请求。
+   * 
+   * @param request
+   * @return
+   */
   @RequestMapping("/server")
   public JSONObject server(HttpServletRequest request) {
     JSONObject result = new JSONObject();
@@ -73,6 +81,13 @@ public class HealthController {
     return result;
   }
 
+  /**
+   * 更新健康检查类型为 NONE 类型的实例的健康状态（包含在请求参数中）
+   * 
+   * @param request
+   * @return
+   * @throws Exception
+   */
   @CanDistro
   @RequestMapping(value = { "", "/instance" }, method = RequestMethod.PUT)
   public String update(HttpServletRequest request) throws Exception {
@@ -107,6 +122,7 @@ public class HealthController {
               + instance.getPort() + "@" + instance.getClusterName() + ", service: " + serviceName
               + ", msg: update thought HealthController api");
           pushService.serviceChanged(service);
+          // todo 为啥处理一个就跳出去了？
           break;
         }
       }
@@ -117,6 +133,11 @@ public class HealthController {
     return "ok";
   }
 
+  /**
+   * 返回支持的全部健康检查器列表。
+   * 
+   * @return
+   */
   @ResponseBody
   @RequestMapping(value = "checkers", method = RequestMethod.GET)
   public ResponseEntity checkers() {

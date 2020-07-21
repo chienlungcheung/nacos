@@ -48,221 +48,286 @@ import java.util.List;
 
 /**
  * Operation for operators
+ * <p>
+ * 运维接口, 管理员可以通过提供的接口对当前 nacos 节点进行一些查询和更改.
  *
  * @author nkorange
  */
 @RestController
-@RequestMapping({UtilsAndCommons.NACOS_NAMING_CONTEXT + "/operator", UtilsAndCommons.NACOS_NAMING_CONTEXT + "/ops"})
+@RequestMapping({ UtilsAndCommons.NACOS_NAMING_CONTEXT + "/operator", UtilsAndCommons.NACOS_NAMING_CONTEXT + "/ops" })
 public class OperatorController {
 
-    @Autowired
-    private PushService pushService;
+  @Autowired
+  private PushService pushService;
 
-    @Autowired
-    private SwitchManager switchManager;
+  @Autowired
+  private SwitchManager switchManager;
 
-    @Autowired
-    private ServiceManager serviceManager;
+  @Autowired
+  private ServiceManager serviceManager;
 
-    @Autowired
-    private ServerListManager serverListManager;
+  @Autowired
+  private ServerListManager serverListManager;
 
-    @Autowired
-    private ServerStatusManager serverStatusManager;
+  @Autowired
+  private ServerStatusManager serverStatusManager;
 
-    @Autowired
-    private SwitchDomain switchDomain;
+  @Autowired
+  private SwitchDomain switchDomain;
 
-    @Autowired
-    private DistroMapper distroMapper;
+  @Autowired
+  private DistroMapper distroMapper;
 
-    @Autowired
-    private RaftCore raftCore;
+  @Autowired
+  private RaftCore raftCore;
 
-    @Autowired
-    private RaftPeerSet raftPeerSet;
+  @Autowired
+  private RaftPeerSet raftPeerSet;
 
-    @RequestMapping("/push/state")
-    public JSONObject pushState(HttpServletRequest request) {
+  /**
+   * 查询或者重置当前 nacos 节点得推送统计.
+   * 
+   * @param request
+   * @return
+   */
+  @RequestMapping("/push/state")
+  public JSONObject pushState(HttpServletRequest request) {
 
-        JSONObject result = new JSONObject();
+    JSONObject result = new JSONObject();
 
-        boolean detail = Boolean.parseBoolean(WebUtils.optional(request, "detail", "false"));
-        boolean reset = Boolean.parseBoolean(WebUtils.optional(request, "reset", "false"));
+    boolean detail = Boolean.parseBoolean(WebUtils.optional(request, "detail", "false"));
+    boolean reset = Boolean.parseBoolean(WebUtils.optional(request, "reset", "false"));
 
-        List<PushService.Receiver.AckEntry> failedPushes = PushService.getFailedPushes();
-        int failedPushCount = pushService.getFailedPushCount();
-        result.put("succeed", pushService.getTotalPush() - failedPushCount);
-        result.put("total", pushService.getTotalPush());
+    List<PushService.Receiver.AckEntry> failedPushes = PushService.getFailedPushes();
+    int failedPushCount = pushService.getFailedPushCount();
+    result.put("succeed", pushService.getTotalPush() - failedPushCount);
+    result.put("total", pushService.getTotalPush());
 
-        if (pushService.getTotalPush() > 0) {
-            result.put("ratio", ((float) pushService.getTotalPush() - failedPushCount) / pushService.getTotalPush());
-        } else {
-            result.put("ratio", 0);
+    if (pushService.getTotalPush() > 0) {
+      result.put("ratio", ((float) pushService.getTotalPush() - failedPushCount) / pushService.getTotalPush());
+    } else {
+      result.put("ratio", 0);
+    }
+
+    JSONArray dataArray = new JSONArray();
+    if (detail) {
+      for (PushService.Receiver.AckEntry entry : failedPushes) {
+        try {
+          dataArray.add(new String(entry.origin.getData(), "UTF-8"));
+        } catch (UnsupportedEncodingException e) {
+          dataArray.add("[encoding failure]");
         }
-
-        JSONArray dataArray = new JSONArray();
-        if (detail) {
-            for (PushService.Receiver.AckEntry entry : failedPushes) {
-                try {
-                    dataArray.add(new String(entry.origin.getData(), "UTF-8"));
-                } catch (UnsupportedEncodingException e) {
-                    dataArray.add("[encoding failure]");
-                }
-            }
-            result.put("data", dataArray);
-        }
-
-        if (reset) {
-            PushService.resetPushState();
-        }
-
-        result.put("reset", reset);
-
-        return result;
+      }
+      result.put("data", dataArray);
     }
 
-    @RequestMapping(value = "/switches", method = RequestMethod.GET)
-    public SwitchDomain switches(HttpServletRequest request) {
-        return switchDomain;
+    if (reset) {
+      PushService.resetPushState();
     }
 
-    @NeedAuth
-    @RequestMapping(value = "/switches", method = RequestMethod.PUT)
-    public String updateSwitch(HttpServletRequest request) throws Exception {
-        Boolean debug = Boolean.parseBoolean(WebUtils.optional(request, "debug", "false"));
-        String entry = WebUtils.required(request, "entry");
-        String value = WebUtils.required(request, "value");
+    result.put("reset", reset);
 
-        switchManager.update(entry, value, debug);
+    return result;
+  }
 
-        return "ok";
+  /**
+   * 返回当前全部开关设置.
+   * 
+   * @param request
+   * @return
+   */
+  @RequestMapping(value = "/switches", method = RequestMethod.GET)
+  public SwitchDomain switches(HttpServletRequest request) {
+    return switchDomain;
+  }
+
+  /**
+   * 更新某个开关项.
+   * 
+   * @param request
+   * @return
+   * @throws Exception
+   */
+  @NeedAuth
+  @RequestMapping(value = "/switches", method = RequestMethod.PUT)
+  public String updateSwitch(HttpServletRequest request) throws Exception {
+    Boolean debug = Boolean.parseBoolean(WebUtils.optional(request, "debug", "false"));
+    String entry = WebUtils.required(request, "entry");
+    String value = WebUtils.required(request, "value");
+
+    switchManager.update(entry, value, debug);
+
+    return "ok";
+  }
+
+  /**
+   * 返回当前 nacos 节点的状态(维护的服务数,实例数,负载,内存等等).
+   * 
+   * @param request
+   * @return
+   */
+  @RequestMapping(value = "/metrics", method = RequestMethod.GET)
+  public JSONObject metrics(HttpServletRequest request) {
+
+    JSONObject result = new JSONObject();
+
+    int serviceCount = serviceManager.getServiceCount();
+    int ipCount = serviceManager.getInstanceCount();
+
+    int responsibleDomCount = serviceManager.getResponsibleServiceCount();
+    int responsibleIPCount = serviceManager.getResponsibleInstanceCount();
+
+    result.put("status", serverStatusManager.getServerStatus().name());
+    result.put("serviceCount", serviceCount);
+    result.put("instanceCount", ipCount);
+    result.put("raftNotifyTaskCount", raftCore.getNotifyTaskCount());
+    result.put("responsibleServiceCount", responsibleDomCount);
+    result.put("responsibleInstanceCount", responsibleIPCount);
+    result.put("cpu", SystemUtils.getCPU());
+    result.put("load", SystemUtils.getLoad());
+    result.put("mem", SystemUtils.getMem());
+
+    return result;
+  }
+
+  /**
+   * 响应外部查询某个服务由哪个 nacos 节点管理,返回其地址.
+   * 
+   * @param request
+   * @return
+   */
+  @RequestMapping(value = "/distro/server", method = RequestMethod.GET)
+  public JSONObject getResponsibleServer4Service(HttpServletRequest request) {
+    String namespaceId = WebUtils.optional(request, CommonParams.NAMESPACE_ID, Constants.DEFAULT_NAMESPACE_ID);
+    String serviceName = WebUtils.required(request, CommonParams.SERVICE_NAME);
+    Service service = serviceManager.getService(namespaceId, serviceName);
+
+    if (service == null) {
+      throw new IllegalArgumentException("service not found");
     }
 
-    @RequestMapping(value = "/metrics", method = RequestMethod.GET)
-    public JSONObject metrics(HttpServletRequest request) {
+    JSONObject result = new JSONObject();
 
-        JSONObject result = new JSONObject();
+    result.put("responsibleServer", distroMapper.mapSrv(serviceName));
 
-        int serviceCount = serviceManager.getServiceCount();
-        int ipCount = serviceManager.getInstanceCount();
+    return result;
+  }
 
-        int responsibleDomCount = serviceManager.getResponsibleServiceCount();
-        int responsibleIPCount = serviceManager.getResponsibleInstanceCount();
+  /**
+   * 查看或清理(参数 action 取值决定)遵从 Partition 协议的 nacos 节点的状态.
+   * 
+   * @param request
+   * @return
+   */
+  @RequestMapping(value = "/distro/status", method = RequestMethod.GET)
+  public JSONObject distroStatus(HttpServletRequest request) {
 
-        result.put("status", serverStatusManager.getServerStatus().name());
-        result.put("serviceCount", serviceCount);
-        result.put("instanceCount", ipCount);
-        result.put("raftNotifyTaskCount", raftCore.getNotifyTaskCount());
-        result.put("responsibleServiceCount", responsibleDomCount);
-        result.put("responsibleInstanceCount", responsibleIPCount);
-        result.put("cpu", SystemUtils.getCPU());
-        result.put("load", SystemUtils.getLoad());
-        result.put("mem", SystemUtils.getMem());
+    JSONObject result = new JSONObject();
+    String action = WebUtils.optional(request, "action", "view");
 
-        return result;
+    if (StringUtils.equals(SwitchEntry.ACTION_VIEW, action)) {
+      result.put("status", serverListManager.getDistroConfig());
+      return result;
     }
 
-    @RequestMapping(value = "/distro/server", method = RequestMethod.GET)
-    public JSONObject getResponsibleServer4Service(HttpServletRequest request) {
-        String namespaceId = WebUtils.optional(request, CommonParams.NAMESPACE_ID,
-            Constants.DEFAULT_NAMESPACE_ID);
-        String serviceName = WebUtils.required(request, CommonParams.SERVICE_NAME);
-        Service service = serviceManager.getService(namespaceId, serviceName);
-
-        if (service == null) {
-            throw new IllegalArgumentException("service not found");
-        }
-
-        JSONObject result = new JSONObject();
-
-        result.put("responsibleServer", distroMapper.mapSrv(serviceName));
-
-        return result;
+    if (StringUtils.equals(SwitchEntry.ACTION_CLEAN, action)) {
+      serverListManager.clean();
+      return result;
     }
 
-    @RequestMapping(value = "/distro/status", method = RequestMethod.GET)
-    public JSONObject distroStatus(HttpServletRequest request) {
+    return result;
+  }
 
-        JSONObject result = new JSONObject();
-        String action = WebUtils.optional(request, "action", "view");
+  /**
+   * 响应查询当前 nacos 集群状态的请求, 会返回全部(或健康,取决于)节点的状态信息.
+   * 
+   * @param request
+   * @return
+   */
+  @RequestMapping(value = "/servers", method = RequestMethod.GET)
+  public JSONObject getHealthyServerList(HttpServletRequest request) {
 
-        if (StringUtils.equals(SwitchEntry.ACTION_VIEW, action)) {
-            result.put("status", serverListManager.getDistroConfig());
-            return result;
-        }
-
-        if (StringUtils.equals(SwitchEntry.ACTION_CLEAN, action)) {
-            serverListManager.clean();
-            return result;
-        }
-
-        return result;
+    boolean healthy = Boolean.parseBoolean(WebUtils.optional(request, "healthy", "false"));
+    JSONObject result = new JSONObject();
+    if (healthy) {
+      result.put("servers", serverListManager.getHealthyServers());
+    } else {
+      result.put("servers", serverListManager.getServers());
     }
 
-    @RequestMapping(value = "/servers", method = RequestMethod.GET)
-    public JSONObject getHealthyServerList(HttpServletRequest request) {
+    return result;
+  }
 
-        boolean healthy = Boolean.parseBoolean(WebUtils.optional(request, "healthy", "false"));
-        JSONObject result = new JSONObject();
-        if (healthy) {
-            result.put("servers", serverListManager.getHealthyServers());
-        } else {
-            result.put("servers", serverListManager.getServers());
-        }
+  /**
+   * 接收其它 nacos 节点发来的服务器状态报告, 形如(已进行 URL 解码):
+   * <p>
+   * GET
+   * /nacos/v1/ns/operator/server/status?encoding=UTF-8&serverStatus=unknown#172.21.51.101:8848#1594774221278#16&nofix=1
+   * 
+   * @param request
+   * @return
+   */
+  @RequestMapping("/server/status")
+  public String serverStatus(HttpServletRequest request) {
+    String serverStatus = WebUtils.required(request, "serverStatus");
+    serverListManager.onReceiveServerStatus(serverStatus);
+    return "ok";
+  }
 
-        return result;
+  /**
+   * 通过 HTTP 接口设置当前 nacos 节点指定 logger 的 log level.
+   * 
+   * @param request
+   * @return
+   */
+  @RequestMapping(value = "/log", method = RequestMethod.PUT)
+  public String setLogLevel(HttpServletRequest request) {
+    String logName = WebUtils.required(request, "logName");
+    String logLevel = WebUtils.required(request, "logLevel");
+    Loggers.setLogLevel(logName, logLevel);
+    return "ok";
+  }
+
+  /**
+   * 分页返回 nacos 集群节点机器状态.
+   * 
+   * @param request
+   * @return
+   */
+  @RequestMapping(value = "/cluster/states", method = RequestMethod.GET)
+  public Object listStates(HttpServletRequest request) {
+
+    String namespaceId = WebUtils.optional(request, CommonParams.NAMESPACE_ID, Constants.DEFAULT_NAMESPACE_ID);
+    JSONObject result = new JSONObject();
+    int page = Integer.parseInt(WebUtils.required(request, "pageNo"));
+    int pageSize = Integer.parseInt(WebUtils.required(request, "pageSize"));
+    String keyword = WebUtils.optional(request, "keyword", StringUtils.EMPTY);
+    String containedInstance = WebUtils.optional(request, "instance", StringUtils.EMPTY);
+
+    List<RaftPeer> raftPeerLists = new ArrayList<>();
+
+    int total = serviceManager.getPagedClusterState(namespaceId, page - 1, pageSize, keyword, containedInstance,
+        raftPeerLists, raftPeerSet);
+
+    if (CollectionUtils.isEmpty(raftPeerLists)) {
+      result.put("clusterStateList", Collections.emptyList());
+      result.put("count", 0);
+      return result;
     }
 
-    @RequestMapping("/server/status")
-    public String serverStatus(HttpServletRequest request) {
-        String serverStatus = WebUtils.required(request, "serverStatus");
-        serverListManager.onReceiveServerStatus(serverStatus);
-        return "ok";
+    JSONArray clusterStateJsonArray = new JSONArray();
+    for (RaftPeer raftPeer : raftPeerLists) {
+      ClusterStateView clusterStateView = new ClusterStateView();
+      clusterStateView.setClusterTerm(raftPeer.term.intValue());
+      clusterStateView.setNodeIp(raftPeer.ip);
+      clusterStateView.setNodeState(raftPeer.state.name());
+      clusterStateView.setVoteFor(raftPeer.voteFor);
+      clusterStateView.setHeartbeatDueMs(raftPeer.heartbeatDueMs);
+      clusterStateView.setLeaderDueMs(raftPeer.leaderDueMs);
+      clusterStateJsonArray.add(clusterStateView);
     }
-
-    @RequestMapping(value = "/log", method = RequestMethod.PUT)
-    public String setLogLevel(HttpServletRequest request) {
-        String logName = WebUtils.required(request, "logName");
-        String logLevel = WebUtils.required(request, "logLevel");
-        Loggers.setLogLevel(logName, logLevel);
-        return "ok";
-    }
-
-    @RequestMapping(value = "/cluster/states", method = RequestMethod.GET)
-    public Object listStates(HttpServletRequest request) {
-
-        String namespaceId = WebUtils.optional(request, CommonParams.NAMESPACE_ID,
-            Constants.DEFAULT_NAMESPACE_ID);
-        JSONObject result = new JSONObject();
-        int page = Integer.parseInt(WebUtils.required(request, "pageNo"));
-        int pageSize = Integer.parseInt(WebUtils.required(request, "pageSize"));
-        String keyword = WebUtils.optional(request, "keyword", StringUtils.EMPTY);
-        String containedInstance = WebUtils.optional(request, "instance", StringUtils.EMPTY);
-
-        List<RaftPeer> raftPeerLists = new ArrayList<>();
-
-        int total = serviceManager.getPagedClusterState(namespaceId, page - 1, pageSize, keyword, containedInstance, raftPeerLists,  raftPeerSet);
-
-        if (CollectionUtils.isEmpty(raftPeerLists)) {
-            result.put("clusterStateList", Collections.emptyList());
-            result.put("count", 0);
-            return result;
-        }
-
-        JSONArray clusterStateJsonArray = new JSONArray();
-        for(RaftPeer raftPeer: raftPeerLists) {
-            ClusterStateView clusterStateView = new ClusterStateView();
-            clusterStateView.setClusterTerm(raftPeer.term.intValue());
-            clusterStateView.setNodeIp(raftPeer.ip);
-            clusterStateView.setNodeState(raftPeer.state.name());
-            clusterStateView.setVoteFor(raftPeer.voteFor);
-            clusterStateView.setHeartbeatDueMs(raftPeer.heartbeatDueMs);
-            clusterStateView.setLeaderDueMs(raftPeer.leaderDueMs);
-            clusterStateJsonArray.add(clusterStateView);
-        }
-        result.put("clusterStateList", clusterStateJsonArray);
-        result.put("count", total);
-        return result;
-    }
+    result.put("clusterStateList", clusterStateJsonArray);
+    result.put("count", total);
+    return result;
+  }
 }

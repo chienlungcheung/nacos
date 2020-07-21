@@ -43,11 +43,22 @@ public class HealthCheckReactor {
     });
   }
 
+  /**
+   * 执行 Cluster 提交的一个 one-shot 健康检查任务。
+   * 
+   * @param task
+   * @return
+   */
   public static ScheduledFuture<?> scheduleCheck(HealthCheckTask task) {
     task.setStartTime(System.currentTimeMillis());
     return EXECUTOR.schedule(task, task.getCheckRTNormalized(), TimeUnit.MILLISECONDS);
   }
 
+  /**
+   * 执行 Service 提交的一个周期性的客户端心跳检测任务（看有没有心跳超时的 Instance）
+   * 
+   * @param task
+   */
   public static void scheduleCheck(ClientBeatCheckTask task) {
     futureMap.putIfAbsent(task.taskKey(), EXECUTOR.scheduleWithFixedDelay(task, 5000, 5000, TimeUnit.MILLISECONDS));
   }
@@ -64,6 +75,12 @@ public class HealthCheckReactor {
     }
   }
 
+  /**
+   * 不要延迟立即运行一个任务
+   * 
+   * @param task
+   * @return
+   */
   public static ScheduledFuture<?> scheduleNow(Runnable task) {
     return EXECUTOR.schedule(task, 0, TimeUnit.MILLISECONDS);
   }

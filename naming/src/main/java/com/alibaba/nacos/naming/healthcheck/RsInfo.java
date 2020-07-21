@@ -38,6 +38,9 @@ public class RsInfo {
   private String ak;
   private String cluster;
   private double weight;
+  /**
+   * 默认是 ephemeral。
+   */
   private boolean ephemeral = true;
   private Map<String, String> metadata;
 

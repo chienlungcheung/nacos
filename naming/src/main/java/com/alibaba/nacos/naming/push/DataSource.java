@@ -16,15 +16,19 @@
 package com.alibaba.nacos.naming.push;
 
 /**
+ * 一个可以定制的数据源.
+ * 
  * @author nacos
  */
 public interface DataSource {
-    /**
-     * Get push data for a specified client
-     *
-     * @param client target client
-     * @return data to push
-     * @throws Exception
-     */
-    String getData(PushService.PushClient client) throws Exception;
+  /**
+   * Get push data for a specified client
+   * <p>
+   * getData 为数据生成器, 负责为参数指定的客户端生成数据.
+   * 
+   * @param client target client
+   * @return data to push
+   * @throws Exception
+   */
+  String getData(PushService.PushClient client) throws Exception;
 }

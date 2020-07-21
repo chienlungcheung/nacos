@@ -24,106 +24,97 @@ import java.util.Objects;
  */
 public class Subscriber implements Serializable {
 
-    private String addrStr;
+  private String addrStr;
 
-    private String agent;
+  private String agent;
 
-    private String app;
+  private String app;
 
-    private String ip;
+  private String ip;
 
-    private String namespaceId;
+  private String namespaceId;
 
-    private String serviceName;
+  private String serviceName;
 
-    public Subscriber(String addrStr, String agent, String app, String ip, String namespaceId, String serviceName) {
-        this.addrStr = addrStr;
-        this.agent = agent;
-        this.app = app;
-        this.ip = ip;
-        this.namespaceId = namespaceId;
-        this.serviceName = serviceName;
+  public Subscriber(String addrStr, String agent, String app, String ip, String namespaceId, String serviceName) {
+    this.addrStr = addrStr;
+    this.agent = agent;
+    this.app = app;
+    this.ip = ip;
+    this.namespaceId = namespaceId;
+    this.serviceName = serviceName;
+  }
+
+  public String getAddrStr() {
+    return addrStr;
+  }
+
+  public void setAddrStr(String addrStr) {
+    this.addrStr = addrStr;
+  }
+
+  public String getAgent() {
+    return agent;
+  }
+
+  public void setAgent(String agent) {
+    this.agent = agent;
+  }
+
+  public String getApp() {
+    return app;
+  }
+
+  public void setApp(String app) {
+    this.app = app;
+  }
+
+  public String getIp() {
+    return ip;
+  }
+
+  public void setIp(String ip) {
+    this.ip = ip;
+  }
+
+  public String getNamespaceId() {
+    return namespaceId;
+  }
+
+  public void setNamespaceId(String namespaceId) {
+    this.namespaceId = namespaceId;
+  }
+
+  public String getServiceName() {
+    return serviceName;
+  }
+
+  public void setServiceName(String serviceName) {
+    this.serviceName = serviceName;
+  }
+
+  @Override
+  public boolean equals(Object o) {
+    if (this == o) {
+      return true;
     }
-
-    public String getAddrStr() {
-        return addrStr;
+    if (o == null || getClass() != o.getClass()) {
+      return false;
     }
+    Subscriber that = (Subscriber) o;
+    return Objects.equals(addrStr, that.addrStr) && Objects.equals(agent, that.agent) && Objects.equals(app, that.app)
+        && Objects.equals(ip, that.ip) && Objects.equals(namespaceId, that.namespaceId)
+        && Objects.equals(serviceName, that.serviceName);
+  }
 
-    public void setAddrStr(String addrStr) {
-        this.addrStr = addrStr;
-    }
+  @Override
+  public int hashCode() {
+    return Objects.hash(addrStr, agent, app, ip, namespaceId, serviceName);
+  }
 
-    public String getAgent() {
-        return agent;
-    }
-
-    public void setAgent(String agent) {
-        this.agent = agent;
-    }
-
-    public String getApp() {
-        return app;
-    }
-
-    public void setApp(String app) {
-        this.app = app;
-    }
-
-    public String getIp() {
-        return ip;
-    }
-
-    public void setIp(String ip) {
-        this.ip = ip;
-    }
-
-    public String getNamespaceId() {
-        return namespaceId;
-    }
-
-    public void setNamespaceId(String namespaceId) {
-        this.namespaceId = namespaceId;
-    }
-
-    public String getServiceName() {
-        return serviceName;
-    }
-
-    public void setServiceName(String serviceName) {
-        this.serviceName = serviceName;
-    }
-
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) {
-            return true;
-        }
-        if (o == null || getClass() != o.getClass()) {
-            return false;
-        }
-        Subscriber that = (Subscriber) o;
-        return Objects.equals(addrStr, that.addrStr) &&
-            Objects.equals(agent, that.agent) &&
-            Objects.equals(app, that.app) &&
-            Objects.equals(ip, that.ip) &&
-            Objects.equals(namespaceId, that.namespaceId) &&
-            Objects.equals(serviceName, that.serviceName);
-    }
-
-    @Override
-    public int hashCode() {
-        return Objects.hash(addrStr, agent, app, ip, namespaceId, serviceName);
-    }
-
-    @Override
-    public String toString() {
-        return "Subscriber{" +
-            "addrStr='" + addrStr + '\'' +
-            ", agent='" + agent + '\'' +
-            ", app='" + app + '\'' +
-            ", ip='" + ip + '\'' +
-            ", namespaceId='" + namespaceId + '\'' +
-            ", serviceName='" + serviceName + '\'' +
-            '}';
-    }
+  @Override
+  public String toString() {
+    return "Subscriber{" + "addrStr='" + addrStr + '\'' + ", agent='" + agent + '\'' + ", app='" + app + '\'' + ", ip='"
+        + ip + '\'' + ", namespaceId='" + namespaceId + '\'' + ", serviceName='" + serviceName + '\'' + '}';
+  }
 }

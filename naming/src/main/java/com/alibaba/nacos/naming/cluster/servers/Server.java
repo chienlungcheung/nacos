@@ -20,8 +20,8 @@ import com.alibaba.nacos.naming.misc.UtilsAndCommons;
 
 /**
  * Member node of Nacos cluster
- *
- * nacos 集群的服务器对应的类型
+ * <p>
+ * Server 表示一个 Nacos 节点.
  *
  * @author nkorange
  * @since 1.0.0
@@ -38,6 +38,9 @@ public class Server implements Comparable<Server> {
      */
     private int servePort;
 
+    /**
+     * Nacos 集群的 site 名称为 unknown
+     */
     private String site = UtilsAndCommons.UNKNOWN_SITE;
 
     private int weight = 1;
@@ -51,6 +54,9 @@ public class Server implements Comparable<Server> {
 
     private boolean alive = false;
 
+    /**
+     * 接收到其它 nacos 节点发来状态报告时会生成一个临时的 Server 对象, 该字段用于记录报告中的上次报告时间戳 lastReportTime.
+     */
     private long lastRefTime = 0L;
 
     private String lastRefTimeStr;

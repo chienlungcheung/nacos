@@ -21,6 +21,8 @@ import java.util.List;
 
 /**
  * Selector with no filtering.
+ * <p>
+ * 什么也不过滤。
  *
  * @author nkorange
  * @since 0.7.0

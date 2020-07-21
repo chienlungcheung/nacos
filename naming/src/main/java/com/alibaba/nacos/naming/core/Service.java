@@ -66,6 +66,9 @@ public class Service extends com.alibaba.nacos.api.naming.pojo.Service implement
   private String token;
   private List<String> owners = new ArrayList<>();
   private Boolean resetWeight = false;
+  /**
+   * 服务是否禁用
+   */
   private Boolean enabled = true;
   private Selector selector = new NoneSelector();
   private String namespaceId;
@@ -301,6 +304,12 @@ public class Service extends com.alibaba.nacos.api.naming.pojo.Service implement
     return allIPs;
   }
 
+  /**
+   * 返回 clusters 全部的实例。
+   * 
+   * @param clusters
+   * @return
+   */
   public List<Instance> allIPs(List<String> clusters) {
     List<Instance> allIPs = new ArrayList<>();
     for (String cluster : clusters) {
@@ -315,6 +324,9 @@ public class Service extends com.alibaba.nacos.api.naming.pojo.Service implement
     return allIPs;
   }
 
+  /**
+   * 获取当前服务全部实例。
+   */
   public List<Instance> srvIPs(List<String> clusters) {
     if (CollectionUtils.isEmpty(clusters)) {
       clusters = new ArrayList<>();
@@ -526,6 +538,9 @@ public class Service extends com.alibaba.nacos.api.naming.pojo.Service implement
     clusterMap.put(cluster.getName(), cluster);
   }
 
+  /**
+   * 检查服务及其全部集群命名是否合乎正则要求。
+   */
   public void validate() {
     if (!getName().matches(SERVICE_NAME_SYNTAX)) {
       throw new IllegalArgumentException(

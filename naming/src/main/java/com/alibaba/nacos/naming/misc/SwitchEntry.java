@@ -17,6 +17,8 @@ package com.alibaba.nacos.naming.misc;
 
 /**
  * All switch entries for naming.
+ * <p>
+ * 用于服务发现的全部开关项名称.
  *
  * @author nkorange
  */

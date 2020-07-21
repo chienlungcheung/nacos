@@ -46,7 +46,7 @@ import java.util.Map;
 /**
  * Restful methods for Partition protocol.
  * <p>
- * 针对 Partition 一致性算法的 http 接口.
+ * 针对 Partition 一致性算法的 http 接口，负责数据一致性维护，如接收其它节点的数据、校验和，响应其它节点拉取数据的请求等。
  * 
  * @author nkorange
  * @since 1.0.0

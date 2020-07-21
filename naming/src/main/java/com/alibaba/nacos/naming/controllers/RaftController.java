@@ -54,7 +54,7 @@ import java.util.Map;
  * Methods for Raft consistency protocol. These methods should only be invoked
  * by Nacos server itself.
  * <p>
- * Raft 相关的 REST API 接口.
+ * Raft 相关的 REST API 接口, 处理诸如选举, 心跳, 读数据, 写数据, 数据同步等请求.
  * <p>
  * 这些方法只能被 nacos 自身调用, 而不能被当作库给客户端用.
  *

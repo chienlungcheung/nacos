@@ -24,88 +24,88 @@ import java.util.Map;
  */
 public class IpAddressInfo implements Serializable {
 
-    private boolean            valid;
+  private boolean valid;
 
-    private Map<String, String> metadata;
+  private Map<String, String> metadata;
 
-    private Integer             port;
+  private Integer port;
 
-    private String              ip;
+  private String ip;
 
-    private Double              weight;
+  private Double weight;
 
-    private boolean            enabled;
+  private boolean enabled;
 
-    public boolean isEnabled() {
-        return enabled;
-    }
+  public boolean isEnabled() {
+    return enabled;
+  }
 
-    public void setEnabled(boolean enabled) {
-        this.enabled = enabled;
-    }
+  public void setEnabled(boolean enabled) {
+    this.enabled = enabled;
+  }
 
-    public boolean isValid() {
-        return valid;
-    }
+  public boolean isValid() {
+    return valid;
+  }
 
-    /**
-     * Setter method for property <tt>valid </tt>.
-     *
-     * @param valid value to be assigned to property valid
-     */
-    public void setValid(boolean valid) {
-        this.valid = valid;
-    }
+  /**
+   * Setter method for property <tt>valid </tt>.
+   *
+   * @param valid value to be assigned to property valid
+   */
+  public void setValid(boolean valid) {
+    this.valid = valid;
+  }
 
-    public Map<String, String> getMetadata() {
-        return metadata;
-    }
+  public Map<String, String> getMetadata() {
+    return metadata;
+  }
 
-    /**
-     * Setter method for property <tt>metadata </tt>.
-     *
-     * @param metadata value to be assigned to property metadata
-     */
-    public void setMetadata(Map<String, String> metadata) {
-        this.metadata = metadata;
-    }
+  /**
+   * Setter method for property <tt>metadata </tt>.
+   *
+   * @param metadata value to be assigned to property metadata
+   */
+  public void setMetadata(Map<String, String> metadata) {
+    this.metadata = metadata;
+  }
 
-    public Integer getPort() {
-        return port;
-    }
+  public Integer getPort() {
+    return port;
+  }
 
-    /**
-     * Setter method for property <tt>port </tt>.
-     *
-     * @param port value to be assigned to property port
-     */
-    public void setPort(Integer port) {
-        this.port = port;
-    }
+  /**
+   * Setter method for property <tt>port </tt>.
+   *
+   * @param port value to be assigned to property port
+   */
+  public void setPort(Integer port) {
+    this.port = port;
+  }
 
-    public String getIp() {
-        return ip;
-    }
+  public String getIp() {
+    return ip;
+  }
 
-    /**
-     * Setter method for property <tt>ip </tt>.
-     *
-     * @param ip value to be assigned to property ip
-     */
-    public void setIp(String ip) {
-        this.ip = ip;
-    }
+  /**
+   * Setter method for property <tt>ip </tt>.
+   *
+   * @param ip value to be assigned to property ip
+   */
+  public void setIp(String ip) {
+    this.ip = ip;
+  }
 
-    public Double getWeight() {
-        return weight;
-    }
+  public Double getWeight() {
+    return weight;
+  }
 
-    /**
-     * Setter method for property <tt>weight </tt>.
-     *
-     * @param weight value to be assigned to property weight
-     */
-    public void setWeight(Double weight) {
-        this.weight = weight;
-    }
+  /**
+   * Setter method for property <tt>weight </tt>.
+   *
+   * @param weight value to be assigned to property weight
+   */
+  public void setWeight(Double weight) {
+    this.weight = weight;
+  }
 }

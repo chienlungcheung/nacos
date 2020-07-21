@@ -49,6 +49,13 @@ public class ClusterController {
   @Autowired
   protected ServiceManager serviceManager;
 
+  /**
+   * 用请求中的信息更新 cluster(若不存在则创建之).
+   * 
+   * @param request
+   * @return
+   * @throws Exception
+   */
   @RequestMapping(value = "", method = RequestMethod.PUT)
   public String update(HttpServletRequest request) throws Exception {
 

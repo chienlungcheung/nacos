@@ -60,7 +60,7 @@ import java.util.stream.Collectors;
 public class ServiceManager implements RecordListener<Service> {
 
   /**
-   * 形如 {@code Map<namespace, Map<group::serviceName, Service>>}
+   * 形如 {@code Map<namespaceId, Map<group@@serviceName, Service>>}
    */
   private Map<String, Map<String, Service>> serviceMap = new ConcurrentHashMap<>();
 
@@ -242,6 +242,11 @@ public class ServiceManager implements RecordListener<Service> {
     String serviceName;
     String serverIP;
 
+    /**
+     * 负责从其它实例拉取某个服务的信息并与本地版本比较，如果不一致则更新本地信息并触发相关事件。
+     * 
+     * @param serviceKey
+     */
     public ServiceUpdater(ServiceKey serviceKey) {
       this.namespaceId = serviceKey.getNamespaceId();
       this.serviceName = serviceKey.getServiceName();
@@ -297,7 +302,7 @@ public class ServiceManager implements RecordListener<Service> {
 
   /**
    * 从地址为 serverIP 的服务实例拉取与 namespaceId:serviceName 对应的信息，
-   * 与本地存储的版本进行比较，如果不一致，推送服务变更事件。
+   * 与本地存储的版本进行比较，如果不一致，则用拉取到的信息更新本地信息并推送服务变更事件。
    * 
    * @param namespaceId
    * @param serviceName
@@ -341,7 +346,7 @@ public class ServiceManager implements RecordListener<Service> {
       }
     }
 
-    // 如果本地版本信息与从远程节点拉取的信息不一致，则推送服务变更事件
+    // 如果本地版本信息与从远程 nacos 节点拉取的信息不一致，则推送服务变更事件
     if (changed) {
       pushService.serviceChanged(service);
     }
@@ -444,10 +449,16 @@ public class ServiceManager implements RecordListener<Service> {
     consistencyService.put(KeyBuilder.buildServiceMetaKey(service.getNamespaceId(), service.getName()), service);
   }
 
+  /**
+   * 如果服务不存在则创建一个空白服务。
+   */
   public void createEmptyService(String namespaceId, String serviceName, boolean local) throws NacosException {
     createServiceIfAbsent(namespaceId, serviceName, local, null);
   }
 
+  /**
+   * 如果参数中的服务不存在则创建之。
+   */
   public void createServiceIfAbsent(String namespaceId, String serviceName, boolean local, Cluster cluster)
       throws NacosException {
     Service service = getService(namespaceId, serviceName);
@@ -502,6 +513,10 @@ public class ServiceManager implements RecordListener<Service> {
    * Register an instance to a service in AP mode.
    * <p>
    * This method creates service or cluster silently if they don't exist.
+   * <p>
+   * 注册一个实例到对应服务中，AP 模式。
+   * <p>
+   * 当对应服务或集群不存在时，该方法会创建之。
    *
    * @param namespaceId id of namespace
    * @param serviceName service name
@@ -510,6 +525,7 @@ public class ServiceManager implements RecordListener<Service> {
    */
   public void registerInstance(String namespaceId, String serviceName, Instance instance) throws NacosException {
 
+    // 如果对应服务不存在则创建之
     createEmptyService(namespaceId, serviceName, instance.isEphemeral());
 
     Service service = getService(namespaceId, serviceName);
@@ -535,9 +551,19 @@ public class ServiceManager implements RecordListener<Service> {
       throw new NacosException(NacosException.INVALID_PARAM, "instance not exist: " + instance);
     }
 
+    // 将实例添加到服务中，并确保各个 nacos 节点数据一致。
     addInstance(namespaceId, serviceName, instance.isEphemeral(), instance);
   }
 
+  /**
+   * 将实例添加到对应服务中，然后依靠一致性算法在各个 nacos 节点存储上达成一致。
+   * 
+   * @param namespaceId
+   * @param serviceName
+   * @param ephemeral
+   * @param ips
+   * @throws NacosException
+   */
   public void addInstance(String namespaceId, String serviceName, boolean ephemeral, Instance... ips)
       throws NacosException {
 
@@ -574,6 +600,16 @@ public class ServiceManager implements RecordListener<Service> {
     consistencyService.put(key, instances);
   }
 
+  /**
+   * 根据传入的参数返回指定的 Instance。
+   * 
+   * @param namespaceId
+   * @param serviceName
+   * @param cluster
+   * @param ip
+   * @param port
+   * @return
+   */
   public Instance getInstance(String namespaceId, String serviceName, String cluster, String ip, int port) {
     Service service = getService(namespaceId, serviceName);
     if (service == null) {
@@ -589,6 +625,7 @@ public class ServiceManager implements RecordListener<Service> {
     }
 
     for (Instance instance : ips) {
+      // IP 和 Port 唯一定位一个 Instance
       if (instance.getIp().equals(ip) && instance.getPort() == port) {
         return instance;
       }
@@ -696,7 +733,7 @@ public class ServiceManager implements RecordListener<Service> {
   }
 
   /**
-   * 将 Service 放入其 namespaceId 对应的集合中，然后将其注册到一致性算法的监听器列表中， 这样，当该 Service 对应
+   * 将 Service 放入其 namespaceId 对应的集合中并将其初始化，然后将其注册到一致性算法的监听器列表中， 这样，当该 Service 对应
    * Instances 有变化时就会触发 Service.onChange 方法进行信息更新。
    * 
    * @param service
@@ -712,6 +749,13 @@ public class ServiceManager implements RecordListener<Service> {
     Loggers.SRV_LOG.info("[NEW-SERVICE] {}", service.toJSON());
   }
 
+  /**
+   * 根据正则表达式 regex 在命名空间 namespaceId 中搜寻相关的服务。
+   * 
+   * @param namespaceId
+   * @param regex
+   * @return
+   */
   public List<Service> searchServices(String namespaceId, String regex) {
     List<Service> result = new ArrayList<>();
     for (Map.Entry<String, Service> entry : chooseServiceMap(namespaceId).entrySet()) {
